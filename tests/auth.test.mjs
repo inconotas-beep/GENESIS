@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {authentication} from '../tools/auth.mjs';
+import G from '../tools/core.mjs';
+test('credenciales con scrypt, contraseña inválida, cambio, duplicados y cuentas desactivadas',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'genesis-auth-')),before=process.env.GENESIS_INITIAL_PASSWORD;try{process.env.GENESIS_INITIAL_PASSWORD='Test-Access-918!';const db=G.seed(),auth=authentication(dir,db);assert.equal(auth.login('ROCIO','Test-Access-918!',db).role,'ADMIN');assert.throws(()=>auth.login('Rocio','incorrecta',db));assert.ok(!fs.readFileSync(path.join(dir,'credentials.json'),'utf8').includes('Test-Access-918!'));auth.set('profesor','Profesor-918!','teacher');assert.equal(auth.login('profesor','Profesor-918!',db).id,'teacher');assert.throws(()=>auth.set('Rocio','Password-918!','teacher'));db.users.find(u=>u.id==='teacher').active=false;assert.throws(()=>auth.login('profesor','Profesor-918!',db));}finally{if(before===undefined)delete process.env.GENESIS_INITIAL_PASSWORD;else process.env.GENESIS_INITIAL_PASSWORD=before;assert.ok(dir.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});}});
+test('bloqueo temporal tras cinco intentos fallidos',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'genesis-auth-')),before=process.env.GENESIS_INITIAL_PASSWORD;try{process.env.GENESIS_INITIAL_PASSWORD='Test-Access-918!';const db=G.seed(),auth=authentication(dir,db);for(let i=0;i<5;i++)assert.throws(()=>auth.login('Rocio','incorrecta',db));assert.throws(()=>auth.login('Rocio','Test-Access-918!',db),/15 minutos/);}finally{if(before===undefined)delete process.env.GENESIS_INITIAL_PASSWORD;else process.env.GENESIS_INITIAL_PASSWORD=before;assert.ok(dir.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});}});

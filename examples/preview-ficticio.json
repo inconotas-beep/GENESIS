@@ -1,0 +1,8 @@
+{
+  "schema": "GENESIS_PREVIEW_V1",
+  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "REQUIRES_REVIEW",
+  "file": "EJEMPLO-FICTICIO.xlsx",
+  "blocks": [{"id":"ficticio-b1","type":"GENERAL_4_PERIODOS","sheet":"1A Matemática","anchor":"B9","endRow":10,"status":"REQUIRES_REVIEW","studentRowCount":1,"columns":[{"column":"E","label":"Actividad 1"},{"column":"F","label":"Actividad 2"},{"column":"G","label":"Actividad 3"}],"rows":[{"nie":"00000001","nieCell":"B10","source":{"range":"B9:H10","cell":"B10"},"cells":[{"cell":"E10","value":8,"formula":null},{"cell":"F10","value":9,"formula":null},{"cell":"G10","value":10,"formula":null}]}]}],
+  "incidents": [{"kind":"MAPPING_REQUIRES_REVIEW","file":"EJEMPLO-FICTICIO.xlsx","sheet":"1A Matemática","cell":"B9"}]
+}

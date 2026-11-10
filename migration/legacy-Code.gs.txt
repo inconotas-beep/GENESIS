@@ -1,0 +1,60 @@
+function doGet() { return HtmlService.createHtmlOutputFromFile('Index').setTitle('GENESIS · INCO'); }
+
+// Production has no simulated login, user parameter, or fallback identity.
+function api(action, params) {
+  var email;try{email=Session.getActiveUser().getEmail();}catch(error){throw publicError_('No se pudo verificar tu cuenta institucional');}
+  if (!email) throw new Error('Acceso denegado: Google no permitió verificar la identidad institucional');
+  var lock = LockService.getScriptLock();try{lock.waitLock(30000);}catch(error){throw publicError_('El sistema está ocupado. Intentá nuevamente en unos momentos');}
+  try {
+    var db = loadDatabase_();
+    var result = Genesis.execute(db, email, action, params || {}, {id:function(){return Utilities.getUuid();}});
+    if (['bootstrap','roster','export','checkImport'].indexOf(action)<0) saveDatabase_(db);
+    return JSON.parse(JSON.stringify(result));
+  } catch(error) { if(error.genesisPublic)throw error;throw publicError_('No se pudo completar la operación. Contactá con administración');
+  } finally { lock.releaseLock(); }
+}
+
+function publicError_(message){var error=new Error(message);error.genesisPublic=true;return error;}
+
+// Private trailing-underscore functions cannot be invoked by google.script.run.
+function spreadsheet_() {
+  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (!id) throw publicError_('El servicio no está disponible. Contactá con administración');
+  return SpreadsheetApp.openById(id);
+}
+function loadDatabase_() {
+  if(PropertiesService.getScriptProperties().getProperty('WRITE_FAILED'))throw publicError_('Acceso bloqueado por una interrupción del servicio. Contactá con administración');
+  var ss=spreadsheet_(), db={};
+  Genesis.tables.forEach(function(name){
+    var sheet=ss.getSheetByName(name);if(!sheet)throw publicError_('No se pudo abrir el registro institucional. Contactá con administración');
+    var rows=sheet.getDataRange().getValues();
+    db[name]=rows.slice(1).filter(function(r){return r[0];}).map(function(r){return JSON.parse(r[1]);});
+  });
+  db.version=Number(ss.getSheetByName('_meta').getRange('A2').getValue());return db;
+}
+function saveDatabase_(db) {
+  var ss=spreadsheet_();
+  // One range write per entity; protected by script lock. Snapshot supports recovery on partial failure.
+  var snapshot=DriveApp.getFileById(ss.getId()).makeCopy('GENESIS respaldo previo '+new Date().toISOString());
+  PropertiesService.getScriptProperties().setProperty('LAST_BACKUP_ID',snapshot.getId());
+  PropertiesService.getScriptProperties().setProperty('WRITE_FAILED','WRITE_IN_PROGRESS');
+  Genesis.tables.forEach(function(name){
+    var sh=ss.getSheetByName(name),rows=[['id','record_json']].concat(db[name].map(function(r,i){return [String(r.id||i),JSON.stringify(r)];}));
+    if(rows.length>sh.getMaxRows())sh.insertRowsAfter(sh.getMaxRows(),rows.length-sh.getMaxRows());
+    sh.getRange(1,1,rows.length,2).setValues(rows);
+    if(sh.getLastRow()>rows.length)sh.getRange(rows.length+1,1,sh.getLastRow()-rows.length,2).clearContent();
+  });
+  ss.getSheetByName('_meta').getRange('A2').setValue(db.version);
+  SpreadsheetApp.flush();
+  PropertiesService.getScriptProperties().deleteProperty('WRITE_FAILED');
+}
+function initializeInstitution_() {
+  var props=PropertiesService.getScriptProperties(),email=props.getProperty('ADMIN_EMAIL');
+  if(!email)throw new Error('Configurá ADMIN_EMAIL con el correo verificado de Rocío');
+  var ss=spreadsheet_();if(ss.getSheetByName('_meta'))throw new Error('Ya inicializado');
+  var db=Genesis.seed();Genesis.tables.forEach(function(t){db[t]=[];ss.insertSheet(t).appendRow(['id','record_json']);});
+  db.roles=[{id:'ADMIN'},{id:'DIRECTION'},{id:'TEACHER'}];db.years=[{id:'2026',label:'2026',finalPolicy:{method:'AVERAGE_4',passMark:6,reason:'Criterio INCO confirmado: materias no modulares aprueban desde 6'}}];
+  db.periods=[1,2,3,4].map(function(n){return {id:String(n),name:'Período '+n,year:'2026'};});
+  db.users=[{id:Utilities.getUuid(),email:email,name:'Rocío',role:'ADMIN',active:true}];
+  ss.insertSheet('_meta').getRange('A1:A2').setValues([['version'],[0]]);saveDatabase_(db);
+}

@@ -1,0 +1,83 @@
+/* INCO reference documents. Keep the logos' original pixels and colors. */
+.inco-sheet-heading { position:relative; display:flex; align-items:center; justify-content:center; padding:18px 110px; min-height:124px; background:white; color:#111; text-align:center; font-family:'Book Antiqua',Georgia,serif; }
+.inco-sheet-heading img { position:absolute; left:16px; top:14px; width:76px; height:88px; object-fit:contain; }
+.inco-sheet-heading p { margin:2px 0; color:inherit; font-size:12px; line-height:1.4; }
+.inco-sheet-heading h3 { margin:5px 0; color:var(--inco-primary,#176B45); font-size:16px; }
+.inco-sheet-meta { padding:10px 12px; display:grid; gap:5px; background:white; color:#111; font:12px 'Book Antiqua',Georgia,serif; border:1px solid #34443D; }
+.inco-workbook { margin-top:16px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:white; }
+.inco-sheet-scroll { max-width:100%; overflow:auto; max-height:72vh; }
+.inco-sheet-table { border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; color:#111; font-family:'Book Antiqua',Georgia,serif; font-size:12px; }
+.inco-sheet-table th, .inco-sheet-table td { border-right:1px solid #93a79b; border-bottom:1px solid #93a79b; padding:4px; min-width:48px; text-align:center; background:white; white-space:normal; vertical-align:middle; }
+.inco-sheet-table thead th { background:#e5efe7; color:#104D35; letter-spacing:0; text-transform:none; line-height:1.2; font-size:11px; position:static; }
+.inco-sheet-table .inco-name { min-width:140px; max-width:310px; text-align:left; }
+.inco-sheet-table .inco-nie { min-width:90px; white-space:nowrap; }
+.inco-sheet-table .inco-number { min-width:35px; }
+#gradeTable.inco-sheet-table th:first-child,#gradeTable.inco-sheet-table td:first-child { min-width:35px; width:35px; box-shadow:none; }
+#gradeTable.inco-sheet-table thead { position:sticky; top:0; z-index:2; }
+.inco-sheet-table input { width:52px; min-height:32px; height:32px; padding:2px; border:1px solid transparent; background:transparent; color:#111; border-radius:2px; font:12px Arial,sans-serif; text-align:center; box-shadow:none; }
+.inco-sheet-table input:focus { border-color:#176B45; outline:2px solid #176B45; background:white; }
+.inco-sheet-table input:disabled { color:#34443D; background:#eff3f0; opacity:1; }
+.inco-sheet-table small { display:block; font-size:10px; }
+.inco-sheet-table tbody tr:last-child td { border-bottom:1px solid #93a79b; }
+.inco-sheet-table .inco-period-selected { background:#f4f8f4; }
+.inco-sheet-table .inco-average,.inco-sheet-table .inco-final { background:#e5efe7; font-weight:bold; }
+.inco-sheet-table .inco-protection { min-width:140px; max-width:220px; font:11px Arial,sans-serif; }
+.inco-edit-period { font:10px Arial,sans-serif; padding:3px 8px; min-height:26px; margin:3px; }
+.inco-edit-period:disabled { opacity:1; background:#104D35; color:white; }
+.inco-sheet-tabs { display:flex; overflow:auto; gap:2px; padding:8px; background:#edf4ee; }
+.inco-sheet-tabs button { flex-shrink:0; font-size:11px; min-height:32px; padding:7px 12px; border-radius:0; }
+.inco-sheet-tabs [aria-current=true] { border-bottom:3px solid #176B45; background:white; color:#104D35; }
+.inco-report-preview { overflow:auto; background:#eef1ee; padding:18px; }
+.inco-report-page { box-sizing:border-box; position:relative; width:190mm; min-height:245mm; margin:0 auto 20px; padding:12mm 9mm; background:white; color:black; box-shadow:0 2px 12px #0001; font-family:'Times New Roman',serif; }
+.inco-report-heading { display:flex; align-items:center; justify-content:space-between; min-height:26mm; text-align:center; gap:8px; }
+.inco-report-logo { width:22mm; height:26mm; object-fit:contain; flex-shrink:0; }
+.inco-report-heading h2 { font-family:'Berlin Sans FB Demi','Book Antiqua',Georgia,serif; font-size:18pt; color:#176B45; margin:0 0 6px; }
+.inco-report-heading p { font:9pt 'Times New Roman',serif; margin:0; line-height:1.3; color:black; }
+.inco-lion-crop { position:relative; overflow:hidden; width:23mm; height:27mm; display:block; flex-shrink:0; }
+.inco-lion-crop img { position:absolute; width:287.73%; height:140.43%; max-width:none; left:-2.18%; top:-21.75%; }
+.inco-report-title { text-align:center; font: bold 17pt 'Berlin Sans FB Demi','Book Antiqua',Georgia,serif; color:#176B45; margin:5mm 0 2mm; }
+.inco-report-year { text-align:center; font:bold 12pt 'Book Antiqua',Georgia,serif; color:#176B45; margin:0 0 5mm; }
+.inco-report-identity,.inco-report-section { display:flex; justify-content:space-between; gap:12px; font-size:10pt; line-height:1.4; margin:3mm 0; }
+.inco-report-identity span:first-child { flex:1; }
+.inco-report-identity span:last-child { white-space:nowrap; }
+.inco-report-section strong { max-width:75%; }
+.inco-report-table { width:100%; table-layout:fixed; border-collapse:collapse; font:10pt 'Times New Roman',serif; margin:4mm 0 0; }
+.inco-report-table .inco-report-subject { width:35%; }
+.inco-report-table .inco-report-observation { width:15%; }
+.inco-report-table th,.inco-report-table td { border:1px solid #222; padding:1.2mm 1.2mm; background:white; color:black; text-align:center; vertical-align:middle; overflow-wrap:anywhere; white-space:normal; font-size:inherit; text-transform:none; letter-spacing:0; position:static; line-height:1.25; }
+.inco-report-table th[scope=row] { text-align:left; font-weight:normal; }
+.inco-report-table tbody tr:last-child td { border-bottom:1px solid #222; }
+.inco-report-table .inco-report-category th { text-align:left; background:#edf4ee; font-weight:bold; }
+.inco-signatures { display:flex; gap:10mm; justify-content:space-between; text-align:center; margin:10mm 0 7mm; font-size:10pt; break-inside:avoid; }
+.inco-signatures div { width:50%; }
+.inco-signatures span { display:block; border-top:1px solid black; padding-top:2mm; }
+.inco-signatures strong { display:block; font-size:9pt; font-weight:normal; margin-top:2mm; }
+.inco-report-footer { text-align:center; color:black; margin:0!important; width:100%; padding:0; font-family:'Book Antiqua',Georgia,serif; break-inside:avoid; }
+.inco-report-footer p { font-size:10pt; font-style:italic; line-height:1.4; margin:0 0 3mm; }
+.inco-report-footer strong { font-family:'Bradley Hand ITC',cursive; font-size:17pt; color:#176B45; }
+.inco-partial { border:1px solid #34443D; padding:6px; font:bold 10px Arial,sans-serif; }
+.inco-report-pagination { display:block; text-align:right; color:#34443D; margin-top:4mm; font-size:8pt; }
+.inco-print-actions { display:flex; justify-content:center; gap:12px; padding:15px; font-family:Arial,sans-serif; }
+@media (max-width:600px) { .inco-sheet-heading { padding:12px 12px 12px 72px; } .inco-sheet-heading img { left:8px; width:52px; } .inco-sheet-heading p { font-size:10px; } .inco-sheet-heading h3 { font-size:13px; } .inco-report-preview { padding:8px; } }
+@media print {
+ .inco-print-actions { display:none!important; }
+ body.inco-print { margin:0!important; background:white!important; }
+ .inco-report-page { width:100%; min-height:0; padding:0; margin:0; box-shadow:none; break-after:page; }
+ .inco-report-page:last-child { break-after:auto; }
+ .inco-report-table thead { display:table-header-group; }
+ .inco-report-table tr { break-inside:avoid; }
+ .inco-report-table th,.inco-report-table td { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+ .inco-print-sheet { break-after:page; }
+ .inco-print-sheet:last-child { break-after:auto; }
+ .inco-print-sheet .inco-sheet-heading { min-height:80px; padding:5px 70px; }
+ .inco-print-sheet .inco-sheet-heading img { width:48px; height:60px; top:5px; }
+ .inco-print-sheet .inco-sheet-heading p { font-size:8pt; }
+ .inco-print-sheet .inco-sheet-heading h3 { font-size:11pt; }
+ .inco-print-sheet .inco-sheet-table { width:100%; min-width:0; table-layout:fixed; font-size:6.5pt; border-collapse:collapse; }
+ .inco-print-sheet .inco-sheet-table th,.inco-print-sheet .inco-sheet-table td { min-width:0; padding:2px; font-size:inherit; }
+ .inco-print-sheet .inco-sheet-table .inco-nie { width:6%; min-width:0; }
+ .inco-print-sheet .inco-sheet-table .inco-name { width:16%; min-width:0; }
+ .inco-print-sheet .inco-sheet-table .inco-number { width:2.5%; }
+ .inco-print-sheet .inco-sheet-table .inco-final,.inco-print-sheet .inco-sheet-table .inco-status { width:6%; overflow-wrap:anywhere; white-space:normal; }
+ .inco-print-sheet .inco-sheet-table small { font-size:6pt; }
+}

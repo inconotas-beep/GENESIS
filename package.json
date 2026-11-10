@@ -1,0 +1,31 @@
+{
+  "name": "genesis-inco",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node tools/server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "audit": "node tools/importer.mjs audit \"NOTAS PROFESORES.zip\"",
+    "build": "node tools/build.mjs",
+    "test:google": "node tools/build.mjs && node --test tests/google-migration.test.mjs tests/google-completion.test.mjs tests/google-oauth.test.mjs tests/institution-import.test.mjs tests/clasp-safety.test.mjs tests/pilot.test.mjs",
+    "test:google-ui": "node tools/build.mjs && node tools/google-ui-check.mjs",
+    "test:inco-ui": "node tools/build.mjs && node tools/inco-ui-check.mjs",
+    "audit:migration": "node tools/migration-audit.mjs",
+    "clasp": "node tools/clasp.mjs",
+    "pilot:check": "node tools/build.mjs && node tools/pilot-preflight.mjs",
+    "test:pilot": "node tools/build.mjs && node --test tests/pilot.test.mjs",
+    "release:check": "node tools/build.mjs && node tools/original-integrity.mjs --allow-current-data && node tools/migration-audit.mjs --capture-current-data && node tools/verify-migration-integrity.mjs && node tools/release-preflight.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@google/clasp": "3.4.1"
+  },
+  "overrides": {
+    "zod": "4.6.7",
+    "glob": "14.0.3",
+    "minimatch": "11.0.4"
+  }
+}
