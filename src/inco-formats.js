@@ -41,28 +41,117 @@ var IncoFormats=(()=>{
    html+='</tr>';
   });return html+'</tbody>';
  }
- function reportPages(document,{logo='',lion='',director='',registrar=''}={}){
+ const reportFormats={
+  general:{name:'Bachillerato General'},
+  accounting:{name:'Bachillerato Técnico Vocacional Administrativo Contable',conduct:true},
+  software:{name:'Bachillerato Técnico Vocacional Desarrollo de Software',conduct:true},
+  tourism:{name:'Bachillerato Técnico Productivo opción Servicios Turísticos'}
+ };
+ const conductCriteria=[
+  'Evidencia actitudes favorables para la convivencia y cultura de paz',
+  'Toma de decisiones de forma autónoma y responsable',
+  'Se expresa y participa con respeto con los demás',
+  'Muestra sentido de pertenencia y respeto por nuestra cultura'
+ ];
+ function normalizeReportLabel(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
+ function resolveReportFormat(document,format){
+  if(Object.hasOwn(reportFormats,format))return reportFormats[format];
+  const name=normalizeReportLabel(document.specialty?.name);
+  if(/^(bachillerato )?general$/.test(name))return reportFormats.general;
+  if(/\badministrativ[oa] contable\b/.test(name))return reportFormats.accounting;
+  if(/\bdesarrollo de software\b/.test(name))return reportFormats.software;
+  if(/\bservicios turisticos\b/.test(name))return reportFormats.tourism;
+  return null;
+ }
+ const moduleGrade=value=>typeof value==='number'?'NL '+(value>=9?5:value>=7?4:value>=5?3:value>=3?2:1):grade(value);
+ const reportLegend={
+  title:'NL = Nivel de logro en módulos',
+  levels:[['NL 1–3','No aprobado'],['NL 4','Aprobado'],['NL 5','Excelente']],
+  minimum:'Nota mínima · Básicas 5.55 · Módulos 7.00',
+  pending:'— = Nota pendiente'
+ };
+ function reportPeriodGrade(result,modular){
+  if(result?.conflict)return 'En revisión';
+  if(result?.unfilledModule)return 'Modulo sin llenar';
+  return modular?moduleGrade(result?.value):grade(result?.value);
+ }
+ function reportModuleGrade(entry,results){
+  if(results.some(result=>result.conflict))return 'En revisión';
+  if(typeof entry.final.value==='number')return moduleGrade(entry.final.value);
+  if(results.length&&results.every(result=>result.unfilledModule))return 'Modulo sin llenar';
+  const graded=results.filter(result=>typeof result.value==='number');
+  if(entry.reportModuleNumber&&graded.length>1)return graded.map(p=>`P${p.id} ${moduleGrade(p.value)}`).join(' · ');
+  return graded.length===1?moduleGrade(graded[0].value):grade(null);
+ }
+ function reportConductGrade(result,index){
+  if(result?.conductCriteria)return result.conflict?'En revisión':result.conductCriteria[index];
+  if(index>=(result?.evaluation?.count??0))return '';
+  return result.conflict?'En revisión':grade(result.values[index],'');
+ }
+ function reportTable(document,student,format){
+  const template=resolveReportFormat(document,format);
+  const periods=document.periods||document.columns.flatMap(c=>c.periods).filter((p,i,a)=>a.findIndex(x=>x.id===p.id)===i);
+  const headers=[template?'Asignatura Complementaria':'Asignatura o módulo',...periods.map((p,i)=>periods.length===4?periodNames[i]:p.name),'Observación'];
+  const groups=[['BASIC','Asignaturas básicas'],['CONCEPTUAL','Asignaturas conceptuales'],['TECHNICAL','Módulos técnicos']];
+  const rows=[],modules=[];
+  const entriesForReport=student.entries.map(entry=>{
+   if(document.section.id!=='3D'||entry.subject.type==='MODULO_FASES')return entry;
+   const number={'ingles tecnico':'3.6',emprendedurismo:'3.7'}[normalizeReportLabel(entry.subject.name)];
+   if(!number)return entry;
+   return {...entry,reportModuleNumber:number,subject:{...entry.subject,type:'MODULO_FASES',category:'TECHNICAL',moduleNumber:number}};
+  });
+  for(const [category,label] of groups){
+   const entries=entriesForReport.filter(e=>Genesis.categoryOf(e.subject)===category);
+   if(!entries.length)continue;
+   if(!template)rows.push({category:label});
+   for(const entry of entries){
+    if(!entry.reportModuleNumber&&entry.periods.every(p=>p.unfilledModule&&!p.conflict)&&entries.some(item=>item.reportModuleNumber===Genesis.moduleIdentity(entry.subject).number))continue;
+    const note=entry.periods.some(p=>p.conflict)?'En revisión':entry.final.status==='REGISTRADO'?`Resultado final: ${moduleGrade(entry.final.value)}`:entry.final.status==='SIN_CRITERIO'?'':GenesisXlsx.statusText(entry.final);
+    const title=Genesis.subjectTitle(entry.subject);
+    const results=periods.map(p=>entry.periods.find(x=>x.id===p.id));
+    if(template&&category==='TECHNICAL'){
+     modules.push({title,result:reportModuleGrade(entry,entry.periods)});
+     continue;
+    }
+    rows.push({cells:[title,...results.map(result=>entry.final.status==='REGISTRADO'?moduleGrade(result?.value):reportPeriodGrade(result,category==='TECHNICAL')),note]});
+    if(template?.conduct&&normalizeReportLabel(entry.subject.name)==='conducta'){
+     conductCriteria.forEach((criterion,index)=>rows.push({criterion:true,cells:[criterion,...results.map(result=>reportConductGrade(result,index)),'']}));
+    }
+   }
+  }
+  return {headers,rows,modules,specialty:document.specialty?.name||template?.name||''};
+ }
+ function reportModuleGroups(modules){
+  const groups=[];
+  for(let start=0;start<modules.length;start+=4)groups.push(modules.slice(start,start+4));
+  return groups;
+ }
+ const reportQuote='“Recuerda que una calificación mide tu desempeño en un momento dado, pero no define tu inteligencia, tu talento ni tu capacidad de brillar en el mundo”.';
+ function reportYear(document){return (document.section.grade?({1:'Primer Año',2:'Segundo Año',3:'Tercer Año'}[document.section.grade]||document.section.grade+' Año'):groupLabel(document.section))+' '+(document.year.label||document.year.id);}
+ function reportPages(document,{logo='',lion='',director='Lic. German Véliz Méndez',registrar='Rocío Guadalupe Hernández Morales',format}={}){
   const pages=[];
   for(const student of document.students){
-   const entries=student.entries,groups=[['BASIC','Asignaturas básicas'],['CONCEPTUAL','Asignaturas conceptuales'],['TECHNICAL','Módulos técnicos']],ordered=groups.flatMap(([category,label])=>entries.filter(e=>Genesis.categoryOf(e.subject)===category).map(e=>({...e,groupLabel:label})));
-   const chunks=[];let chunk=[],units=0;
-   for(const entry of ordered){const size=Math.max(1,Math.ceil(Genesis.subjectTitle(entry.subject).length/52));if(chunk.length&&units+size>14){chunks.push(chunk);chunk=[];units=0;}chunk.push(entry);units+=size;}
-   if(chunk.length)chunks.push(chunk);if(!chunks.length)chunks.push([]);
-   chunks.forEach((chunk,pageIndex)=>{
-    const periods=document.columns.flatMap(c=>c.periods).filter((p,i,a)=>a.findIndex(x=>x.id===p.id)===i);
-    const cols=Math.max(1,periods.length),identity=names(student),gradeYear=document.section.grade?({1:'Primer Año',2:'Segundo Año',3:'Tercer Año'}[document.section.grade]||document.section.grade+' Año'):groupLabel(document.section);
-    const header=`<header class="inco-report-heading"><img src="${escape(logo)}" class="inco-report-logo" alt="Escudo del INCO"><div><h2>Instituto Nacional de Comercio</h2><p>Final Calle Campos y Avenida Barberena, San Jacinto, San Salvador<br>Tel. 2270-2852</p></div>${lion?`<span class="inco-lion-crop" aria-hidden="true"><img src="${escape(lion)}" alt=""></span>`:''}</header><h3 class="inco-report-title">Boleta de Calificaciones</h3><p class="inco-report-year">${escape(gradeYear)} ${escape(document.year.label||document.year.id)}</p><div class="inco-report-identity"><span>Estudiante: <strong>${escape(identity.full)}</strong></span><span>NIE: <strong>${escape(student.nie)}</strong></span></div><div class="inco-report-section"><strong>${escape(document.specialty?.name||'')}</strong><span>Sección: ${escape(groupLabel(document.section))}</span></div>`;
-    let body=`<table class="inco-report-table"><colgroup><col class="inco-report-subject">${periods.map(()=>'<col>').join('')}<col class="inco-report-observation"></colgroup><thead><tr><th>Asignatura o módulo</th>${periods.map((p,i)=>`<th>${escape(periods.length===4?periodNames[i]:p.name)}</th>`).join('')}<th>Observación</th></tr></thead><tbody>`;
-    let previous='';for(const e of chunk){if(e.groupLabel!==previous){previous=e.groupLabel;body+=`<tr class="inco-report-category"><th colspan="${cols+2}" scope="rowgroup">${escape(previous)}</th></tr>`;}
-     const note=e.periods.some(p=>p.conflict)?'En revisión':e.final.status==='SIN_CRITERIO'?'':GenesisXlsx.statusText(e.final);
-     body+=`<tr><th scope="row">${escape(Genesis.subjectTitle(e.subject))}</th>${periods.map(p=>{const result=e.periods.find(x=>x.id===p.id);return `<td>${escape(result?.conflict?'En revisión':grade(result?.value))}</td>`;}).join('')}<td>${escape(note)}</td></tr>`;
-    }if(!chunk.length)body+=`<tr><td colspan="${cols+2}">Sin asignaturas autorizadas para esta selección.</td></tr>`;body+='</tbody></table>';
+    const {headers,rows,modules,specialty}=reportTable(document,student,format),identity=names(student);
+    const header=`<header class="inco-report-heading"><img src="${escape(logo)}" class="inco-report-logo" alt="Escudo del INCO"><div><h2>Instituto Nacional de Comercio</h2><p>Final Calle Campos y Avenida Barberena, San Jacinto, San Salvador<br>Tel. 2270-2852</p></div>${lion?`<span class="inco-lion-crop" aria-hidden="true"><img src="${escape(lion)}" alt=""></span>`:''}</header><h3 class="inco-report-title">Boleta de Calificaciones</h3><p class="inco-report-year">${escape(reportYear(document))}</p><div class="inco-report-identity"><span>Estudiante: <strong>${escape(identity.full)}</strong></span><span>NIE: <strong>${escape(student.nie)}</strong></span></div><div class="inco-report-section"><strong>${escape(specialty)}</strong><span>Sección: ${escape(groupLabel(document.section))}</span></div>`;
+    let body=`<table class="inco-report-table"><colgroup><col class="inco-report-subject">${headers.slice(1,-1).map(()=>'<col>').join('')}<col class="inco-report-observation"></colgroup><thead><tr>${headers.map(label=>`<th scope="col">${escape(label)}</th>`).join('')}</tr></thead><tbody>`;
+    for(const row of rows){
+     if(row.category)body+=`<tr class="inco-report-category"><th colspan="${headers.length}" scope="rowgroup">${escape(row.category)}</th></tr>`;
+     else body+=`<tr${row.criterion?' class="inco-report-criterion"':''}><th scope="row">${escape(row.cells[0])}</th>${row.cells.slice(1).map(cell=>`<td>${escape(cell)}</td>`).join('')}</tr>`;
+    }
+    if(!rows.length&&!modules.length)body+=`<tr><td colspan="${headers.length}">Sin asignaturas autorizadas para esta selección.</td></tr>`;
+    body+='</tbody></table>';
+    if(!rows.length&&modules.length)body='';
+    if(modules.length){
+     body+='<div class="inco-report-technical"><h4>Área Técnica</h4>';
+     for(const group of reportModuleGroups(modules))body+=`<table class="inco-report-table"><thead><tr>${group.map(module=>`<th scope="col">${escape(module.title)}</th>`).join('')}</tr></thead><tbody><tr>${group.map(module=>`<td>${escape(module.result)}</td>`).join('')}</tr></tbody></table>`;
+     body+='</div>';
+    }
     const signatures=`<div class="inco-signatures"><div><span>${escape(director)}</span><strong>Director</strong></div><div><span>${escape(registrar)}</span><strong>Responsable de Registro Académico</strong></div></div>`;
-    const quote='<footer class="inco-report-footer"><p>“Recuerda que una calificación mide tu desempeño en un momento dado, pero no define tu inteligencia, tu talento ni tu capacidad de brillar en el mundo”.</p><strong>Dinastía de Campeones!!!</strong></footer>';
-    pages.push(`<article class="inco-report-page" data-report-student="${escape(student.id)}">${header}${document.scope==='PARTIAL'?'<p class="inco-partial">CONSULTA PARCIAL · Únicamente asignaturas autorizadas al docente</p>':''}${body}${signatures}${quote}<small class="inco-report-pagination">${pageIndex+1} / ${chunks.length}</small></article>`);
-   });
+    const quote=`<footer class="inco-report-footer"><p class="inco-report-credits"><b>${reportLegend.title}</b></p><table class="inco-report-legend"><thead><tr>${reportLegend.levels.map(([level])=>`<th scope="col">${level}</th>`).join('')}</tr></thead><tbody><tr>${reportLegend.levels.map(([,meaning])=>`<td>${meaning}</td>`).join('')}</tr></tbody></table><p class="inco-report-credits">${reportLegend.minimum} · ${reportLegend.pending}</p><p>${reportQuote}</p><strong>Dinastía de Campeones!!!</strong><p class="inco-report-credits">${reportCredits}</p></footer>`;
+    pages.push(`<article class="inco-report-page" data-report-student="${escape(student.id)}"><div class="inco-report-frame"><div class="inco-report-content">${header}${document.scope==='PARTIAL'?'<p class="inco-partial">CONSULTA PARCIAL · Únicamente asignaturas autorizadas al docente</p>':''}${body}${signatures}${quote}</div></div></article>`);
   }return pages.join('');
  }
- return {escape,grade,names,phase,columns,sheetHeader,sheetTable,reportPages};
+ const reportCredits='Fernando Ortiz · Kevin Alvarado · Anderson Aleman';
+ return {escape,grade,names,phase,columns,sheetHeader,sheetTable,reportPages,reportTable,reportModuleGroups,reportFormats,reportYear,reportQuote,reportCredits,reportLegend,groupLabel};
 })();
 if(typeof module!=='undefined')module.exports=IncoFormats;

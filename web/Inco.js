@@ -1,7 +1,7 @@
 /* Reference formats reuse the existing authorized API and grade-save controls. */
 let incoWorkbook=null;
 function incoLogo(){return document.querySelector('.brand-logo').src;}
-function incoPrintOptions(){return {logo:incoLogo(),lion:$('incoLionAsset').src,director:$('reportDirector').value,registrar:$('reportRegistrar').value};}
+function incoPrintOptions(){return {logo:incoLogo(),lion:$('incoLionAsset').src,director:$('reportDirector').value,registrar:$('reportRegistrar').value,format:$('reportFormat').value};}
 async function renderIncoGradeSheet(){
  const id=selected,periodId=loadedPeriod,owner=state.user.id;
  incoWorkbook=null;
@@ -43,10 +43,45 @@ async function selectIncoAssignment(id){
 }
 $('incoSheetTabs').onclick=safe(async event=>{const button=event.target.closest('[data-inco-assignment]');if(button&&canDiscard())await selectIncoAssignment(button.dataset.incoAssignment);});
 function openIncoPrint(){const popup=window.open('','_blank');if(!popup)throw Error('Permití la ventana de impresión del navegador.');popup.opener=null;popup.document.write('<!doctype html><html lang="es"><title>GENESIS · Impresión</title><p>Preparando el documento…</p></html>');popup.document.close();return popup;}
+function fitReportFrame(frame){
+ const content=frame.firstElementChild;
+ const {width,height}=frame.getBoundingClientRect();
+ if(width<=0||height<=5)return;
+ const available=height-5;
+ const maximumScale=Math.min(1,width/(191.8*96/25.4));
+ const heightAtScale=scale=>{
+  content.style.width=width/scale+'px';
+  content.style.zoom=String(scale);
+  return content.getBoundingClientRect().height;
+ };
+ if(heightAtScale(maximumScale)<=available)return;
+ let low=0,high=maximumScale;
+ // Measure after zoom to include the browser's rounding of table borders
+ // and text, particularly on narrow screens.
+ for(let attempt=0;attempt<12;attempt++){
+  const candidate=(low+high)/2;
+  if(heightAtScale(candidate)<=available)low=candidate;
+  else high=candidate;
+ }
+ if(low>0)heightAtScale(low);
+}
+function showIncoReportPreview(output,report){
+ reportPreviewResize||=new ResizeObserver(entries=>{
+  for(const {target} of entries)fitReportFrame(target);
+ });
+ output.innerHTML='<div class="inco-report-preview">'+IncoFormats.reportPages(report,incoPrintOptions())+'</div>';
+ for(const frame of output.querySelectorAll('.inco-report-frame')){
+  fitReportFrame(frame);
+  reportPreviewResize.observe(frame);
+ }
+}
+function fitReportPages(root){
+ for(const frame of root.querySelectorAll('.inco-report-frame'))fitReportFrame(frame);
+}
 function writeIncoPrint(popup,body,landscape=false){
  const styles=[...document.querySelectorAll('style[data-inco-format],link[href*="print-formats.css"]')].map(el=>el.tagName==='LINK'?`<link rel="stylesheet" href="${esc(el.href)}">`:el.outerHTML).join('');
  popup.document.open();popup.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>GENESIS · ${landscape?'Cuadro docente':'Boletas'}</title>${styles}<style>@page{size:letter ${landscape?'landscape':'portrait'};margin:12mm}body{background:#eef1ee}.inco-print-actions button{padding:12px 20px}</style></head><body class="inco-print"><div class="inco-print-actions"><button id="incoPrintNow">Imprimir o guardar PDF</button><button id="incoPrintClose">Cerrar</button></div>${body}</body></html>`);popup.document.close();
- const ready=async()=>{await Promise.all([...popup.document.images].map(img=>img.decode().catch(()=>{})));await popup.document.fonts.ready;popup.document.getElementById('incoPrintNow').onclick=()=>popup.print();popup.document.getElementById('incoPrintClose').onclick=()=>popup.close();popup.focus();popup.print();};
+ const ready=async()=>{await Promise.all([...popup.document.images].map(img=>img.decode().catch(()=>{})));await popup.document.fonts.ready;if(popup.closed)return;fitReportPages(popup.document);popup.document.getElementById('incoPrintNow').onclick=()=>popup.print();popup.document.getElementById('incoPrintClose').onclick=()=>popup.close();popup.focus();popup.print();};
  if(popup.document.readyState==='complete')ready();else popup.onload=ready;
 }
 $('printGradeSheet').onclick=safe(async()=>{
@@ -57,8 +92,5 @@ $('printGradeSheet').onclick=safe(async()=>{
   if(!pages.length)throw Error('La sección no tiene estudiantes matriculados');writeIncoPrint(popup,pages.join(''),true);
  }catch(error){popup.close();throw error;}
 });
-$('printAllReports').onclick=safe(async()=>{
- if(dirty)throw Error('Guardá las notas antes de generar las boletas.');const popup=openIncoPrint();
- try{const result=await fetchAcademicDocument('consolidated',documentParams());if(!result||!result.students.length)throw Error('No hay estudiantes para imprimir');writeIncoPrint(popup,IncoFormats.reportPages(result,incoPrintOptions()));}catch(error){popup.close();throw error;}
-});
-for(const id of ['reportDirector','reportRegistrar'])$(id).oninput=()=>{if(academicDocument?.kind==='reportCard')renderAcademicDocument();};
+for(const [key,format] of Object.entries(IncoFormats.reportFormats))$('reportFormat').add(new Option(format.name,key));
+for(const id of ['reportDirector','reportRegistrar','reportFormat'])$(id).oninput=()=>{if(academicDocument?.kind==='reportCard')renderAcademicDocument();};

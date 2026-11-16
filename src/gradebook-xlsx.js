@@ -73,7 +73,7 @@ var GenesisXlsx = (()=>{
       }return {name:a.name,cells};
     });
   }
-  const statusText=final=>({APROBADO:'Aprobado',REPROBADO:'Reprobado',PENDIENTE:'Pendiente',SIN_CRITERIO:'Criterio pendiente'}[final?.status]||'Pendiente');
+  const statusText=final=>({APROBADO:'Aprobado',REPROBADO:'Reprobado',PENDIENTE:'Pendiente',SIN_CRITERIO:'Criterio pendiente',REGISTRADO:'Resultado final registrado'}[final?.status]||'Pendiente');
   function groupSheets(roster,assignment,blank=false){
     const metadata={schema:'GENESIS_TEMPLATE_V1',assignmentId:assignment.id,teacherId:assignment.teacherId,year:assignment.year,sectionId:assignment.sectionId,subjectId:assignment.subjectId,periodId:roster.periodId,evaluation:{mode:roster.evaluation.mode,count:roster.evaluation.count,weights:roster.evaluation.weights,labels:roster.evaluation.labels}};
     const headers=['NIE','Estudiante',...roster.evaluation.labels,'Resultado del período','Estado'];
@@ -90,19 +90,70 @@ var GenesisXlsx = (()=>{
     }
     return [{name:document.kind==='reportCard'?'Boleta':'Consolidado',rows},{name:'Calificaciones',rows:notes},{name:'Contexto',rows:[['Dato','Valor'],['Año lectivo',document.year.label],['Sección',document.section.name],['Especialidad',document.specialty?.name||'Sin especialidad configurada'],['Cuadro',document.frame?.name||'Todos'],['Formato solicitado',document.frame?.formatSlot?'Formato '+document.frame.formatSlot+' · plantilla oficial pendiente':'Sin formato oficial seleccionado'],['Alcance',document.notice],['Ponderación por fases','En módulos por fases, el porcentaje corresponde al promedio de las tres evaluaciones de la fase; no a cada nota individual.']]}];
   }
-  function template(sheets,file){
-    const metadataSheet=sheets.find(s=>s.name==='_GENESIS');if(!metadataSheet)return null;
-    const raw=metadataSheet.cells.find(c=>c.cell==='B2');if(raw?.formula||typeof raw?.value!=='string')throw Error('Contexto de plantilla inválido');let metadata;try{metadata=JSON.parse(raw.value);}catch{throw Error('Contexto de plantilla inválido');}
+  function parseMetadata(cell){
+    if(cell?.formula||cell?.error||typeof cell?.value!=='string')throw Error('Contexto de plantilla inválido');
+    try{return JSON.parse(cell.value);}catch{throw Error('Contexto de plantilla inválido');}
+  }
+  function templateRows(sheet,metadata,file,section=false){
     if(metadata.schema!=='GENESIS_TEMPLATE_V1'||!Number.isInteger(metadata.evaluation?.count)||metadata.evaluation.count<1||metadata.evaluation.count>9)throw Error('Versión o configuración de plantilla inválida');
-    const sheet=sheets.find(s=>s.name==='Cuadro docente');if(!sheet)throw Error('Falta el cuadro docente');
+    if(!sheet)throw Error('Falta una pestaña de calificaciones');
     const cells=new Map(sheet.cells.map(c=>[c.cell,c])),rowNumbers=[...new Set(sheet.cells.filter(c=>c.row>1).map(c=>c.row))],rows=[];
+    if(cells.size!==sheet.cells.length)throw Error('La pestaña contiene celdas duplicadas');
     const headers=['NIE','Estudiante',...(metadata.evaluation.labels||[])];if(headers.length!==metadata.evaluation.count+2||headers.some((label,i)=>cells.get(col(i)+'1')?.value!==label||cells.get(col(i)+'1')?.formula))throw Error('Los encabezados o el orden de las notas fueron modificados');
     for(const row of rowNumbers){const nie=cells.get('A'+row),values=Array.from({length:metadata.evaluation.count},(_,i)=>{const c=cells.get(col(i+2)+row);if(c?.formula||c?.error)throw Error('Las notas no pueden contener fórmulas o errores');if(c?.value===null||c===undefined)return null;if(typeof c.value!=='number'||!Number.isFinite(c.value)||c.value<0||c.value>10)throw Error('Nota inválida en '+c.cell);return c.value;});
       if(values.every(v=>v===null))continue;
       if(nie?.formula||typeof nie?.value!=='string'||!/^\d{1,20}$/.test(nie.value))throw Error('El NIE debe conservarse como texto, incluyendo sus ceros iniciales');
-      rows.push({nie:nie.value,values,source:{file,sheet:sheet.name,block:'GENESIS_TEMPLATE_V1',range:`A${row}:${col(metadata.evaluation.count+3)}${row}`,cell:'A'+row}});
-    }if(!rows.length)throw Error('La plantilla no contiene notas para revisar');if(rows.length>200)throw Error('La plantilla supera los 200 estudiantes permitidos');return {metadata,rows};
+      rows.push(section?{nie:nie.value,values,rowNumber:row}:{nie:nie.value,values,source:{file,sheet:sheet.name,block:'GENESIS_TEMPLATE_V1',range:`A${row}:${col(metadata.evaluation.count+3)}${row}`,cell:'A'+row}});
+    }if(!section&&!rows.length)throw Error('La plantilla no contiene notas para revisar');if(rows.length>200)throw Error('La plantilla supera los 200 estudiantes permitidos');return rows;
   }
-  return {MIME,write,read,template,groupSheets,documentSheets,statusText};
+  function template(sheets,file){
+    const metadataSheet=sheets.find(s=>s.name==='_GENESIS');if(!metadataSheet)return null;
+    const metadata=parseMetadata(metadataSheet.cells.find(c=>c.cell==='B2'));
+    return {metadata,rows:templateRows(sheets.find(s=>s.name==='Cuadro docente'),metadata,file)};
+  }
+  const SECTION_SCHEMA='GENESIS_SECTION_V1',SECTION_INDEX='_GENESIS_SECCION';
+  function sectionSheets(book,blank=false){
+    const rosters=book.rosters.filter(r=>!blank||r.assignment.active);
+    if(!rosters.length||rosters.length>98)throw Error('Seleccioná una sección y período con entre 1 y 98 asignaturas disponibles');
+    const context={schema:SECTION_SCHEMA,year:book.year.id,sectionId:book.section.id,periodId:book.periodId};
+    const metadata=[['Pestaña','Contexto'],['Sección',JSON.stringify(context)]];
+    const guide=[['Dato','Valor'],['Año lectivo',book.year.label],['Sección',book.section.name],['Período',book.periodName],
+      ['Alcance',book.scope==='PARTIAL'?'Solo asignaturas asignadas':'Sección completa'],
+      ['Importación','En las pestañas editables, ingresá las notas sin cambiar el NIE ni los encabezados. 0.0 es válido. Las notas existentes se conservan.'],
+      ['Pestaña','Asignatura o módulo','Uso']];
+    const tabs=rosters.map((roster,i)=>{
+      const title=roster.subject.displayName||roster.subject.name;
+      const name=(String(i+1).padStart(2,'0')+' '+title.replace(/[\\/*?:\[\]']/g,' ')).slice(0,31).trimEnd();
+      const [sheet,,index]=groupSheets(roster,roster.assignment,blank);
+      const editable=!!roster.assignment.active;
+      metadata.push([name,editable?index.rows[1][1]:'CONSULTA']);
+      guide.push([name,title,editable?'Editable':'Solo consulta']);
+      return {...sheet,name};
+    });
+    return [{name:'Guía de la sección',rows:guide},...tabs,{name:SECTION_INDEX,hidden:true,rows:metadata}];
+  }
+  function sectionTemplate(sheets){
+    const index=sheets.find(s=>s.name===SECTION_INDEX);
+    if(!index)throw Error('Usá la plantilla XLSX de la sección descargada desde GENESIS');
+    const cells=new Map(index.cells.map(c=>[c.cell,c])),context=parseMetadata(cells.get('B2'));
+    const tabs=new Map(sheets.map(s=>[s.name,s]));
+    if(context?.schema!==SECTION_SCHEMA||cells.size!==index.cells.length||tabs.size!==sheets.length)throw Error('Contexto de sección inválido');
+    tabs.delete(SECTION_INDEX);tabs.delete('Guía de la sección');
+    const groups=[];
+    for(const cell of index.cells.filter(c=>c.column==='A'&&c.row>2)){
+      const name=cell.value,descriptor=cells.get('B'+cell.row);
+      if(cell.formula||!tabs.has(name))throw Error('Falta una pestaña de la sección o se cambió su nombre');
+      const sheet=tabs.get(name);tabs.delete(name);
+      if(descriptor?.value==='CONSULTA'&&!descriptor.formula)continue;
+      const metadata=parseMetadata(descriptor);
+      if(['year','sectionId','periodId'].some(key=>metadata?.[key]!==context[key]))throw Error('Hay una pestaña de otro año, sección o período');
+      const rows=templateRows(sheet,metadata,'',true);
+      if(rows.length)groups.push({tab:name,template:metadata,rows});
+    }
+    if(tabs.size)throw Error('El libro contiene pestañas sin contexto');
+    if(!groups.length)throw Error('El libro no contiene notas para revisar');
+    return {...context,groups};
+  }
+  return {MIME,write,read,template,groupSheets,documentSheets,sectionSheets,sectionTemplate,statusText};
 })();
 if(typeof module!=='undefined')module.exports=GenesisXlsx;

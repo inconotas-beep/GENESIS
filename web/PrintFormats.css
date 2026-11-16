@@ -27,8 +27,13 @@
 .inco-sheet-tabs { display:flex; overflow:auto; gap:2px; padding:8px; background:#edf4ee; }
 .inco-sheet-tabs button { flex-shrink:0; font-size:11px; min-height:32px; padding:7px 12px; border-radius:0; }
 .inco-sheet-tabs [aria-current=true] { border-bottom:3px solid #176B45; background:white; color:#104D35; }
-.inco-report-preview { overflow:auto; background:#eef1ee; padding:18px; }
-.inco-report-page { box-sizing:border-box; position:relative; width:190mm; min-height:245mm; margin:0 auto 20px; padding:12mm 9mm; background:white; color:black; box-shadow:0 2px 12px #0001; font-family:'Times New Roman',serif; }
+.inco-report-preview { background:#eef1ee; padding:18px; }
+.inco-report-page { box-sizing:border-box; position:relative; margin:0 auto; background:white; color:black; box-shadow:0 2px 12px #0001; font-family:'Times New Roman',serif; }
+.inco-report-preview .inco-report-page { width:min(100%,215.9mm); aspect-ratio:8.5 / 11; }
+.inco-report-preview .inco-report-frame { position:absolute; inset:4.3% 5.56%; }
+.inco-report-content { display:flow-root; }
+.inco-print .inco-report-page { width:191.8mm; height:254mm; overflow:hidden; }
+.inco-print .inco-report-frame { height:100%; }
 .inco-report-heading { display:flex; align-items:center; justify-content:space-between; min-height:26mm; text-align:center; gap:8px; }
 .inco-report-logo { width:22mm; height:26mm; object-fit:contain; flex-shrink:0; }
 .inco-report-heading h2 { font-family:'Berlin Sans FB Demi','Book Antiqua',Georgia,serif; font-size:18pt; color:#176B45; margin:0 0 6px; }
@@ -48,6 +53,12 @@
 .inco-report-table th[scope=row] { text-align:left; font-weight:normal; }
 .inco-report-table tbody tr:last-child td { border-bottom:1px solid #222; }
 .inco-report-table .inco-report-category th { text-align:left; background:#edf4ee; font-weight:bold; }
+.inco-report-criterion th[scope=row] { padding-left:3mm; font-style:italic; }
+.inco-report-technical { margin-top:3mm; }
+.inco-report-technical h4 { text-align:center; font-size:10pt; margin:0 0 1mm; }
+.inco-report-technical .inco-report-table { margin:0; }
+.inco-report-technical .inco-report-table + .inco-report-table { margin-top:1mm; }
+.inco-report-technical th { background:#edf4ee; }
 .inco-signatures { display:flex; gap:10mm; justify-content:space-between; text-align:center; margin:10mm 0 7mm; font-size:10pt; break-inside:avoid; }
 .inco-signatures div { width:50%; }
 .inco-signatures span { display:block; border-top:1px solid black; padding-top:2mm; }
@@ -55,15 +66,24 @@
 .inco-report-footer { text-align:center; color:black; margin:0!important; width:100%; padding:0; font-family:'Book Antiqua',Georgia,serif; break-inside:avoid; }
 .inco-report-footer p { font-size:10pt; font-style:italic; line-height:1.4; margin:0 0 3mm; }
 .inco-report-footer strong { font-family:'Bradley Hand ITC',cursive; font-size:17pt; color:#176B45; }
+.inco-report-footer .inco-report-credits { font:8pt 'Times New Roman',serif; margin:1mm 0 0; }
+.inco-report-legend { width:100%; table-layout:fixed; border-collapse:collapse; margin:1mm 0; font:8pt 'Times New Roman',serif; }
+.inco-report-legend th,.inco-report-legend td { padding:1mm; border:1px solid #a8c9b1; text-align:center; }
+.inco-report-legend th { background:#f8faf7; color:#104d35; }
+@page {
+ @top-left { content:''; } @top-center { content:''; } @top-right { content:''; }
+ @bottom-left { content:''; } @bottom-center { content:''; } @bottom-right { content:''; }
+}
 .inco-partial { border:1px solid #34443D; padding:6px; font:bold 10px Arial,sans-serif; }
-.inco-report-pagination { display:block; text-align:right; color:#34443D; margin-top:4mm; font-size:8pt; }
 .inco-print-actions { display:flex; justify-content:center; gap:12px; padding:15px; font-family:Arial,sans-serif; }
+.workflow-checklist { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:8px; max-height:18rem; overflow:auto; margin-block:12px; }
+.workflow-checklist small { display:block; color:var(--muted,#34443D); }
 @media (max-width:600px) { .inco-sheet-heading { padding:12px 12px 12px 72px; } .inco-sheet-heading img { left:8px; width:52px; } .inco-sheet-heading p { font-size:10px; } .inco-sheet-heading h3 { font-size:13px; } .inco-report-preview { padding:8px; } }
 @media print {
  .inco-print-actions { display:none!important; }
  body.inco-print { margin:0!important; background:white!important; }
- .inco-report-page { width:100%; min-height:0; padding:0; margin:0; box-shadow:none; break-after:page; }
- .inco-report-page:last-child { break-after:auto; }
+ .inco-print .inco-report-page { width:100%; height:254mm; margin:0; box-shadow:none; break-inside:avoid; break-after:page; }
+ .inco-print .inco-report-page:last-child { break-after:auto; }
  .inco-report-table thead { display:table-header-group; }
  .inco-report-table tr { break-inside:avoid; }
  .inco-report-table th,.inco-report-table td { -webkit-print-color-adjust:exact; print-color-adjust:exact; }

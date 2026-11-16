@@ -12,7 +12,7 @@ var GooglePilot=(()=>{
  function authorize(email,action){
   if(GoogleConfig.property('ENVIRONMENT',false)!=='PILOT')return;
   const settings=config();if(!settings.emails.includes(email))throw publicError_('Cuenta no autorizada para este piloto');
-  if(!['pilotIdentity','bootstrap','roster','export','saveGrades','period','checkImport','consolidated','reportCard','frame','gradeLock','evaluationPolicy','specialty','sectionSpecialty','frameConfig','importPreview','approveImport','revertImport'].includes(action))throw publicError_('Operación deshabilitada en el piloto sintético');
+  if(!['pilotIdentity','bootstrap','roster','export','saveGrades','period','checkImport','consolidated','reportCard','sectionReportCards','reportOptions','reportSubjects','sectionWorkbook','frame','gradeLock','evaluationPolicy','specialty','sectionSpecialty','frameConfig','importPreview','approveImport','revertImport'].includes(action))throw publicError_('Operación deshabilitada en el piloto sintético');
  }
  function identity(email){const settings=config();authorize(email,'pilotIdentity');const index=settings.emails.indexOf(email);return {environment:'PILOT',pilotId:settings.id,email,role:index===0?'ADMIN':index===3?'DIRECTION':'TEACHER',identityAvailable:true};}
  function fixture(settings){

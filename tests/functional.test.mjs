@@ -9,8 +9,13 @@ const save=(run,values=[8,9,10],periodId='1',studentId='s1')=>run(teacher,'saveG
 
 test('un decimal compartido sin redondear cálculos ni convertir pendientes a cero',()=>{
   for(const [value,expected]of [[8.95,'9.0'],[7,'7.0'],[0,'0.0'],[9.25,'9.3'],[null,'Pendiente']])assert.equal(G.formatGrade(value),expected);
-  const {run}=fixture();for(const p of ['1','2','3','4'])save(run,[5.99,5.99,5.99],p);
-  const s=run(teacher,'roster',{assignmentId:'a1',periodId:'1'}).students[0];assert.equal(G.formatGrade(s.final.value),'6.0');assert.equal(s.final.status,'REPROBADO');assert.equal(s.values[0],5.99);
+  const {db,run}=fixture();for(const p of ['1','2','3','4'])save(run,[5.549,5.549,5.549],p);
+  const roster=()=>run(teacher,'roster',{assignmentId:'a1',periodId:'1'}).students[0];
+  const s=roster();assert.equal(G.formatGrade(s.final.value),'5.5');assert.equal(s.final.status,'REPROBADO');assert.equal(s.values[0],5.549);
+  for(const p of ['1','2','3','4'])save(run,[5.6,5.6,5.6],p);
+  assert.equal(roster().final.status,'APROBADO');
+  db.subjects.find(subject=>subject.id===db.assignments[0].subjectId).category='CONCEPTUAL';
+  assert.equal(roster().final.status,'REPROBADO');
 });
 test('configura una a cinco notas por ámbito y conserva cero, pendientes y pesos explícitos',()=>{
   for(let count=1;count<=5;count++){

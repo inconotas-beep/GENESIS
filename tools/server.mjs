@@ -20,6 +20,11 @@ const server=http.createServer(async(req,res)=>{
     if(!hosts.includes(req.headers.host)||req.headers.origin&&!hosts.some(host=>req.headers.origin==='http://'+host))return send(403,{error:'Origen no autorizado'});
     if(req.method==='GET'&&req.url==='/'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return res.end(fs.readFileSync(path.join(root,'web/Index.html'),'utf8').replace('__LOCAL_TOKEN__',token));}
     const assets={'/assets/inco-formats.js':['../src/inco-formats.js','text/javascript'],'/assets/inco.js':['Inco.js','text/javascript'],'/assets/print-formats.css':['PrintFormats.css','text/css'],'/assets/inco-boleta-lion.png':['assets/inco-boleta-lion.png','image/png'],'/assets/google-auth.js':['GoogleAuth.js','text/javascript'],'/assets/app.js':['App.js','text/javascript'],'/assets/functional.js':['Functional.js','text/javascript'],'/assets/core.js':['../src/core.js','text/javascript'],'/assets/gradebook-xlsx.js':['../src/gradebook-xlsx.js','text/javascript'],'/assets/styles.css':['Styles.css','text/css'],'/assets/inco-logo.png':['assets/inco-logo.png','image/png']};
+    Object.assign(assets,{
+      '/assets/section-workflows.js':['SectionWorkflows.js','text/javascript'],
+      '/assets/report-pdf.js':['ReportPdf.js','text/javascript'],
+      '/assets/jspdf.js':['../node_modules/jspdf/dist/jspdf.umd.min.js','text/javascript']
+    });
     if(req.method==='GET'&&assets[req.url]){const [name,type]=assets[req.url];res.writeHead(200,{'Content-Type':type+(type.startsWith('text/')?'; charset=utf-8':'')});return res.end(fs.readFileSync(path.join(root,'web',name)));}
     if(req.method!=='POST'||!['/api','/login','/logout','/access-account','/roster-review','/xlsx-preview'].includes(req.url))return send(404,{error:'No encontrado'});
     if(req.headers['x-genesis-local']!==token)return send(403,{error:'Origen local no autorizado'});

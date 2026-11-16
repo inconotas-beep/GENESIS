@@ -51,20 +51,30 @@ function publicError_(message){const error=Error(message);error.genesisPublic=tr
 function loadDatabase_(){return GoogleStorage.load();}
 function saveDatabase_(db,before){return GoogleStorage.save(db,before);}
 function api(action,params,authToken){
+ const native=typeof NativeLogin!=='undefined'&&NativeLogin.enabled();
+ if(native){
+  if(action==='authConfig')return {mode:'PASSWORD'};
+  if(action==='nativeLogin')return NativeLogin.login(params);
+  if(action==='authLogout')return NativeLogin.logout(authToken);
+  if(action==='authStart'||action==='authPoll'||action==='googleAccount')throw publicError_('Usá tu cuenta de GENESIS');
+  NativeLogin.session(authToken);
+ }
  if(action==='authConfig')return GoogleOAuth.settings();
  if(action==='authStart')return GoogleOAuth.start();
  if(action==='authPoll')return GoogleOAuth.poll(params||{});
  if(action==='authLogout')return GoogleOAuth.logout(authToken);
- const email=GoogleConfig.identity(authToken);
+ const googleEmail=native?null:GoogleConfig.identity(authToken);
  GoogleConfig.access();
- if(typeof GooglePilot!=='undefined'){GooglePilot.authorize(email,action);if(action==='pilotIdentity')return GooglePilot.identity(email);}
+ if(!native&&typeof GooglePilot!=='undefined'){GooglePilot.authorize(googleEmail,action);if(action==='pilotIdentity')return GooglePilot.identity(googleEmail);}
  return GoogleConfig.lock(()=>{
   try{
    const db=loadDatabase_(),p=params||{};
    // The same core authenticates the account, even for supplemental Google operations.
-   const actor=GoogleAccounts.authenticate(db,email);
+   const actor=native?NativeLogin.actor(db,authToken):GoogleAccounts.authenticate(db,googleEmail);
+   const email=actor.email;
+   if(native&&action==='nativeAccount')return NativeLogin.set(db,actor,p);
    if(action==='credentials')throw publicError_('En Google se utilizan cuentas institucionales, no contraseñas locales');
-   if(action==='rosterReview'){GoogleConfig.admin(db,email);return GoogleDrive.rosterReview();}
+   if(action==='rosterReview'){if(actor.role!=='ADMIN')throw publicError_('Solo administración puede realizar esta operación');return GoogleDrive.rosterReview();}
    if(action==='xlsxPreview')return xlsxPreview_(db,email,p);
    if(action==='googleAccount')return googleAccount_(db,email,p);
    const before=JSON.parse(JSON.stringify(db));

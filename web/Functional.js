@@ -1,5 +1,6 @@
 /* Read-only academic documents, explicit frame composition and scoped evaluation controls. */
 let academicDocument=null,academicDocumentParams=null,academicDocumentOwner=null,academicDocumentRequest=0,evaluationReadOnly=false;
+let reportPreviewResize;
 const subjectTitle=subject=>Genesis.subjectTitle(subject);
 const categoryLabel=subject=>({BASIC:'Materia básica',CONCEPTUAL:'Materia conceptual',TECHNICAL:'Módulo técnico'}[Genesis.categoryOf(subject)]);
 function downloadAcademic(blob,name){const url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -19,7 +20,14 @@ async function prepareCompatibleXlsx(file){
   $('previewInfo').innerHTML='<p class="info">Plantilla compatible: se validará el docente, grupo, asignatura, período, esquema de evaluación y matrícula antes de aprobar.</p>';
   $('importColumns').classList.add('hidden');$('buildImportRows').classList.add('hidden');await renderImportRows(canonical.rows);return true;
 }
-function resetAcademicDocument(){academicDocumentRequest++;academicDocument=null;academicDocumentParams=null;academicDocumentOwner=null;$('reportOutput').innerHTML='<p class="empty-inline">Consultá el consolidado con los filtros seleccionados.</p>';$('exportDocument').disabled=true;$('printDocument').disabled=true;$('loadReportCard').disabled=true;$('reportStudent').innerHTML='';}
+function resetAcademicDocument(){
+  academicDocumentRequest++;academicDocument=null;academicDocumentParams=null;academicDocumentOwner=null;
+  reportPreviewResize?.disconnect();
+  $('reportOutput').innerHTML='<p class="empty-inline">Consultá el consolidado con los filtros seleccionados.</p>';
+  for(const id of ['exportDocument','printDocument','loadReportCard','downloadReportPdf'])$(id).disabled=true;
+  $('reportStudent').innerHTML='';
+  updateReportStudentActions([]);clearReportSubjectEditor();clearReportOutputSubjects();
+}
 function syncDocumentContext(){
   const year=$('documentYear').value,section=$('documentSection').value;
   editableOptions('documentPeriod',state.periods.filter(p=>p.year===year),p=>p.name,'Todos los períodos');
@@ -32,12 +40,15 @@ async function fetchAcademicDocument(kind,params){
   let result;try{result=await api(kind,params);}catch(error){if(request!==academicDocumentRequest||state.user.id!==owner.id||state.user.role!==owner.role)return null;throw error;}
   if(request!==academicDocumentRequest||state.user.id!==owner.id||state.user.role!==owner.role)return null;
   academicDocument=result;
-  if(kind!=='reportCard')options('reportStudent',result.students.map(s=>({id:s.id,name:s.name+' · '+s.nie})));
+  if(kind!=='reportCard'){
+    options('reportStudent',result.students.map(s=>({id:s.id,name:s.name+' · '+s.nie})));
+    updateReportStudentActions(result.students);
+  }
   $('loadReportCard').disabled=!result.students.length;$('exportDocument').disabled=!result.columns.length;$('printDocument').disabled=!result.columns.length;renderAcademicDocument();
   return result;
 }
 async function loadAcademicDocument(kind='consolidated'){
-  const params=documentParams();if(kind==='reportCard')params.studentId=$('reportStudent').value;
+  const params=kind==='reportCard'?{...reportOutputContext(),studentId:$('reportStudent').value}:documentParams();
   return fetchAcademicDocument(kind,params);
 }
 async function refreshVisibleAcademicDocument(version){
@@ -57,12 +68,14 @@ async function syncAcademicDocumentControls(){
 }
 function resultCell(value,locked=false,conflict=false){return esc(Genesis.formatGrade(value))+(conflict?'<small>En revisión</small>':locked?'<small>Bloqueado</small>':'');}
 function renderAcademicDocument(){
-  const d=academicDocument;if(!d)return;
+  if(!academicDocument)return;
+  const d=academicDocument.kind==='reportCard'?filterReportOutput(academicDocument):academicDocument;
+  reportPreviewResize?.disconnect();
   const title=d.kind==='reportCard'?'Boleta de calificaciones':'Consolidado de calificaciones';
   const heading=`<div class="panel-heading"><div class="brand"><img class="brand-logo" src="${document.querySelector('.brand-logo').src}" alt="Escudo del INCO" width="46" height="54"><div><h3>${title}</h3><small>Instituto Nacional de Comercio · ${esc(d.year.label)} · ${esc(sectionLabel(d.section))}</small>${d.specialty?'<small>'+esc(d.specialty.name)+'</small>':''}${d.frame?'<small>'+esc(d.frame.name)+'</small>':''}${d.frame?.formatSlot?'<small>Formato '+esc(d.frame.formatSlot)+' · plantilla oficial pendiente</small>':''}</div></div></div><p class="help">${esc(d.notice)}</p>`;
   if(!d.columns.length){$('reportOutput').innerHTML=heading+'<p class="empty-inline">Sin materias y períodos configurados para esta selección. No se han creado ni modificado notas.</p>';return;}
   if(d.kind==='reportCard'&&typeof IncoFormats!=='undefined'){
-    $('reportOutput').innerHTML='<div class="inco-report-preview">'+IncoFormats.reportPages(d,incoPrintOptions())+'</div>';
+    showIncoReportPreview($('reportOutput'),d);
   }else if(d.kind==='reportCard'){
     const s=d.students[0];$('reportOutput').innerHTML=heading+`<h3>${esc(s.name)}</h3><p class="muted">NIE ${esc(s.nie)}</p>`+s.entries.map(e=>`<article><h3>${esc(subjectTitle(e.subject))}</h3><p class="help">${categoryLabel(e.subject)} · ${esc(e.teachers.join(', ')||'Sin asignación activa')}</p><div class="scroll"><table><thead><tr><th>Período</th><th>Calificaciones</th><th>Resultado del período</th></tr></thead><tbody>${e.periods.map(p=>`<tr><td>${esc(p.name)}</td><td>${p.values.map(v=>esc(Genesis.formatGrade(v))).join(' · ')}</td><td>${resultCell(p.value,p.locked,p.conflict)}</td></tr>`).join('')}</tbody></table></div><p><strong>Resultado final: ${esc(Genesis.formatGrade(e.final.value,e.final.status==='SIN_CRITERIO'?'Criterio pendiente':'Pendiente'))}</strong> · ${GenesisXlsx.statusText(e.final)}</p></article>`).join('');
   }else{
@@ -76,7 +89,13 @@ $('loadConsolidated').onclick=safe(()=>loadAcademicDocument());$('loadReportCard
 $('exportDocument').onclick=safe(async()=>{if(!academicDocumentParams)return;const {kind,params}=academicDocumentParams,result=await fetchAcademicDocument(kind,params);if(result)downloadWorkbook(GenesisXlsx.documentSheets(result),result.kind==='reportCard'?'genesis-boleta.xlsx':'genesis-consolidado.xlsx');});
 $('printDocument').onclick=safe(async()=>{
   if(academicDocument?.kind==='reportCard'){
-    const popup=openIncoPrint();try{const {kind,params}=academicDocumentParams,result=await fetchAcademicDocument(kind,params);if(!result)throw Error('La selección cambió; consultá nuevamente la boleta.');writeIncoPrint(popup,IncoFormats.reportPages(result,incoPrintOptions()));}catch(error){popup.close();throw error;}return;
+    const popup=openIncoPrint();
+    try{
+      const studentId=academicDocument.students[0].id;
+      const result=await sectionReport('reportCard',{studentId});
+      writeIncoPrint(popup,IncoFormats.reportPages(result,incoPrintOptions()));
+    }catch(error){popup.close();throw error;}
+    return;
   }
   if(!academicDocument)return;const printWindow=window.open('','_blank');if(!printWindow){message('Permití la ventana de impresión del navegador.',true);return;}
   const styles=[...document.querySelectorAll('style,link[rel="stylesheet"]')].map(el=>el.tagName==='LINK'?`<link rel="stylesheet" href="${esc(el.href)}">`:el.outerHTML).join('');
@@ -233,6 +252,7 @@ async function renderFunctional(){
   syncSectionTeacherFilters();
   editableOptions('teacherSubjectYear',canViewSubjectTeachers()?state.years:[],y=>y.label||y.name||y.id,'Todos los años lectivos');filterTeacherSubjectTeachers();
   await syncAcademicDocumentControls();
+  syncSectionWorkflows();
   options('frameSpecialty',state.specialties);options('specialtySection',state.sections.map(s=>({...s,name:sectionLabel(s)})));options('frameYear',state.years,'label');renderFrameCards();
   $('frameAdministration').classList.toggle('hidden',state.user.role!=='ADMIN');
   if(state.user.role==='ADMIN'){options('evaluationAssignment',state.assignments.map(a=>({...a,name:`${nameOf('subjects',a.subjectId)} · ${nameOf('sections',a.sectionId)} · ${a.year}`})));fillEvaluationPeriods();await syncEvaluationScope();}

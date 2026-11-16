@@ -38,12 +38,49 @@ test('INCO: report renders all authorized categories and module numbers with one
  assert.equal(F.names({name:'Nombre completo sin desglosar'}).full,'Nombre completo sin desglosar');assert.equal(F.names({name:'Nombre completo sin desglosar'}).last,'');
 });
 
-test('INCO: teacher reports are visibly partial, escaped, paginated, and never add foreign subjects',()=>{
+test('INCO: teacher reports are visibly partial and render all selected subjects in one student page',()=>{
  const db=G.seed();db.assignments[1].teacherId='other';const doc=G.execute(db,'docente@example.invalid','reportCard',{year:'2026',sectionId:'1A',studentId:'s1'});
  let html=F.reportPages(doc);assert.match(html,/CONSULTA PARCIAL/);assert.ok(!html.includes('Módulo de comercio'));
- const entry=doc.students[0].entries[0];doc.students[0].entries=Array.from({length:35},(_,i)=>({...entry,subject:{...entry.subject,id:'m'+i,name:'Materia '+i}}));html=F.reportPages(doc);assert.equal((html.match(/class="inco-report-page"/g)||[]).length,3);assert.match(html,/Materia 34/);assert.match(html,/3 \/ 3/);
+ const entry=doc.students[0].entries[0];doc.students[0].entries=Array.from({length:35},(_,i)=>({...entry,subject:{...entry.subject,id:'m'+i,name:'Materia '+i}}));html=F.reportPages(doc);assert.equal((html.match(/class="inco-report-page"/g)||[]).length,1);assert.match(html,/Materia 34/);
 });
 
 test('INCO: module phase subtotals follow the existing weights and keep pending scores pending',()=>{
  const values=[8,9,10,5,6,7,0,1,2],before=values.slice();assert.equal(F.phase(values,[.25,.5,.25],0).average,9);assert.equal(F.phase(values,[.25,.5,.25],1).weighted,3);assert.equal(F.phase([null,9,10],[.25,.5,.25],0).average,null);assert.deepEqual(values,before);
+});
+
+test('INCO: Word formats keep all modules with one existing final result per module',()=>{
+ const db=G.seed();db.assignments[1].sectionId='1A';db.subjects[1].moduleNumber='1.6';
+ const doc=G.execute(db,'rocio@example.invalid','reportCard',{year:'2026',sectionId:'1A',studentId:'s1'});
+ const student=doc.students[0],entry=student.entries.find(e=>e.subject.id==='module');
+ const template=F.reportFormats.accounting.name;
+ doc.specialty={name:template};
+ entry.periods[0].unfilledModule=false;entry.periods[0].value=0;
+ const before=JSON.stringify(doc),table=F.reportTable(doc,student);
+ assert.equal(table.specialty,template);assert.equal(table.headers[0],'Asignatura Complementaria');
+ assert.equal(table.modules[0].result,'NL 1');assert.match(table.modules[0].title,/Módulo 1.6/);
+ for(const format of Object.keys(F.reportFormats)){
+  const html=F.reportPages(doc,{format});assert.match(html,/Área Técnica/);assert.match(html,/Módulo 1.6/);assert.match(html,/>NL 1<\/td>/);assert.match(html,/NL = Nivel de logro/);
+ }
+ assert.equal(JSON.stringify(doc),before);
+ for(const [score,level] of [[6,'NL 3'],[6.99,'NL 3'],[7,'NL 4'],[8.5,'NL 4'],[10,'NL 5']]){
+  entry.periods[0].value=score;assert.equal(F.reportTable(doc,student).modules[0].result,level);
+ }
+ entry.periods[1].unfilledModule=false;entry.periods[1].value=8;
+ assert.equal(F.reportTable(doc,student).modules[0].result,'—');
+ entry.periods[1].conflict=true;assert.equal(F.reportTable(doc,student).modules[0].result,'En revisión');
+});
+
+test('INCO: Conducta rows reuse the four registered notes in the confirmed order',()=>{
+ const db=G.seed();db.subjects[0].name='Conducta';
+ const admin='rocio@example.invalid';
+ G.execute(db,admin,'evaluationPolicy',{version:db.version,assignmentId:'a1',periodId:'1',count:4,weights:[.25,.25,.25,.25],reason:'Criterios sintéticos para la prueba'});
+ G.execute(db,admin,'saveGrades',{version:db.version,assignmentId:'a1',periodId:'1',rows:[{studentId:'s1',values:[5,0,9,8.95]}]});
+ const before=JSON.stringify(db);
+ const doc=G.execute(db,'rocio@example.invalid','reportCard',{year:'2026',sectionId:'1A',studentId:'s1'});
+ const student=doc.students[0];
+ const criteria=F.reportTable(doc,student,'software').rows.filter(row=>row.criterion);
+ assert.deepEqual(json(criteria.map(row=>row.cells[1])),['5.0','0.0','9.0','9.0']);
+ assert.ok(criteria.every(row=>row.cells[2]===''));
+ assert.equal(F.reportTable(doc,student,'general').rows.some(row=>row.criterion),false);
+ assert.equal(JSON.stringify(db),before);
 });

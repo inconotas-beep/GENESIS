@@ -1,8 +1,8 @@
 /* Shared business rules. No network or platform dependencies. */
 var Genesis = (() => {
-  const optionalTables = ['specialties','academicFrames','frameLinks','evaluationPolicies','gradeLocks'];
+  const optionalTables = ['specialties','academicFrames','frameLinks','evaluationPolicies','gradeLocks','moduleFinals'];
   const tables = ['years','students','enrollments','sections','teachers','users','roles','assignments','subjects','periods','blocks','activities','weights','grades','recoveries','periodStates','audit','batches','incidents',...optionalTables];
-  const readActions = ['bootstrap','roster','export','teacherWorkbook','checkImport','consolidated','reportCard','frame'];
+  const readActions = ['bootstrap','roster','export','teacherWorkbook','checkImport','consolidated','reportCard','frame','reportOptions','sectionReportCards','sectionWorkbook','checkSectionImport'];
   function fail(message) { const error=new Error(message);error.genesisPublic=true;throw error; }
   function requireThat(ok, message) { if (!ok) fail(message); }
   function score(value) { requireThat(value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 10), 'Nota inválida: usá un número entre 0 y 10 o vacío'); return value; }
@@ -80,18 +80,20 @@ var Genesis = (() => {
     const students=db.enrollments.filter(e=>e.year===a.year&&e.sectionId===a.sectionId).map(e=>{
       const s=db.students.find(s=>s.id===e.studentId);requireThat(s,'Matrícula sin estudiante: requiere revisión administrativa');
       const current=resultAt(s.id,periodId),results=periods.map(p=>resultAt(s.id,p.id).result.value);
-      const final=subject.type==='GENERAL_4_PERIODOS'&&results.length===4?finalResult(results,policy):{sum:null,average:null,value:null,status:'SIN_CRITERIO'};
+      const basic=categoryOf(subject)==='BASIC';
+      const final=subject.type==='GENERAL_4_PERIODOS'&&results.length===4?finalResult(results,basic?{method:policy?.method||'AVERAGE_4',passMark:policy?.method==='SUM_4'?22.2:5.55}:policy):{sum:null,average:null,value:null,status:'SIN_CRITERIO'};
       return {...s,...current,recorded:index.records.has(gradeKey(a,s.id,periodId)),locked:!!current.lock,periodResults:results,final,annual:final.average};
     });
     return {students,assignment:{...a},periodId,subject:subjectView(subject),evaluation,periodIds:periods.map(p=>p.id),finalPolicy:policy,weights:evaluation.weights,closed,version:db.version};
   }
   function completion(db,assignments){
     const {records:grades,conflicts}=gradeIndex(db);
+    const finalModules=new Set((db.moduleFinals||[]).map(g=>gradeKey(g,g.studentId,'')));
     const bySection=new Map();for(const e of db.enrollments){const key=e.year+'|'+e.sectionId;if(!bySection.has(key))bySection.set(key,[]);bySection.get(key).push(e);}
     const out=[];
     for(const a of assignments){const subject=db.subjects.find(s=>s.id===a.subjectId);if(!subject)continue;const enrollments=bySection.get(a.year+'|'+a.sectionId)||[];
       const periods=subject.type==='GENERAL_4_PERIODOS'?db.periods.filter(p=>p.year===a.year).map(p=>p.id):a.requiredPeriods||[...new Set(db.grades.filter(g=>g.year===a.year&&g.sectionId===a.sectionId&&g.subjectId===a.subjectId).map(g=>g.periodId))];
-      if(!periods.length){out.push({assignmentId:a.id,teacherId:a.teacherId,year:a.year,sectionId:a.sectionId,subjectId:a.subjectId,periodId:null,missingActivities:0,incompleteStudents:0,reason:'CONFIRMAR_PERIODOS'});continue;}
+      if(!periods.length){if(!enrollments.length||enrollments.some(e=>!finalModules.has(gradeKey(a,e.studentId,''))))out.push({assignmentId:a.id,teacherId:a.teacherId,year:a.year,sectionId:a.sectionId,subjectId:a.subjectId,periodId:null,missingActivities:0,incompleteStudents:0,reason:'CONFIRMAR_PERIODOS'});continue;}
       for(const periodId of periods){let missingActivities=0,incompleteStudents=0;const n=evaluationFor(db,a,periodId).count;
         for(const e of enrollments){const g=grades.get([a.year,a.sectionId,a.subjectId,e.studentId,periodId].join('|'));let missing=g?Array.from({length:n},(_,i)=>g.values?.[i]).filter(v=>v===null||v===undefined).length:n;
           if(conflicts.has(gradeKey(a,e.studentId,periodId))||g&&g.values?.length!==n)missing=n;
@@ -129,16 +131,121 @@ var Genesis = (() => {
     const resultFor=(subject,values,a,periodId)=>a?evaluate(values,evaluationFor(db,a,periodId)):calculate(subject.type,values,db.weights.find(w=>w.id===subject.id)?.values);
     const gradeConflict=(a,studentId,periodId)=>index().conflicts.has(gradeKey(a,studentId,periodId));
     const locked=(a,studentId,periodId)=>index().locks.get(gradeKey(a,studentId,periodId));
+    const hasSubjectGrades=id=>db.grades.some(g=>g.subjectId===id)||(db.moduleFinals||[]).some(g=>g.subjectId===id);
     const validateTemplate=(template,a,periodId)=>{
       if(!template)return;
       requireThat(template.schema==='GENESIS_TEMPLATE_V1'&&['year','sectionId','subjectId','teacherId'].every(key=>template[key]===a[key])&&template.assignmentId===a.id&&template.periodId===periodId,'La plantilla no corresponde al docente, grupo, asignatura o período seleccionados');
       const plan=evaluationFor(db,a,periodId);requireThat(template.evaluation?.mode===plan.mode&&template.evaluation?.count===plan.count&&JSON.stringify(template.evaluation?.weights)===JSON.stringify(plan.weights),'La configuración de la plantilla cambió; descargá una nueva');
     };
+    const sectionContext=()=>{
+      const year=db.years.find(y=>y.id===p.year),section=db.sections.find(s=>s.id===p.sectionId);
+      requireThat(year&&section,'Seleccioná año lectivo y sección válidos');
+      return {year,section};
+    };
+    const sectionAssignments=()=>{
+      const candidates=db.assignments.filter(a=>a.year===p.year&&a.sectionId===p.sectionId&&(user.role!=='TEACHER'||a.active&&own(a))).sort((a,b)=>Number(b.active)-Number(a.active));
+      const bySubject=new Map();
+      for(const a of candidates)if(!bySubject.has(a.subjectId))bySubject.set(a.subjectId,a);
+      if(user.role!=='TEACHER'){
+        const historical=[...db.grades,...(db.moduleFinals||[])].filter(g=>g.year===p.year&&g.sectionId===p.sectionId).map(g=>g.subjectId);
+        const section=db.sections.find(s=>s.id===p.sectionId);
+        for(const subjectId of [...historical,...(section.subjectIds||[])])if(!bySubject.has(subjectId))bySubject.set(subjectId,{year:p.year,sectionId:p.sectionId,subjectId,teacherId:null,active:false});
+      }
+      requireThat(user.role!=='TEACHER'||bySubject.size,'Acceso denegado: sección no asignada');
+      return [...bySubject.values()];
+    };
+    const scheduledFor=(a,periodId)=>{
+      if(db.subjects.find(s=>s.id===a.subjectId)?.type!=='MODULO_FASES')return true;
+      if(db.grades.some(g=>sameScope(g,a,periodId)))return true;
+      const schedules=db.assignments.filter(x=>x.active&&own(x)&&sameScope(x,a)&&x.requiredPeriods?.length);
+      return !schedules.length||schedules.some(x=>x.requiredPeriods.includes(periodId));
+    };
+    const reportRule=(section,periodId)=>section.reportSubjects?.find(rule=>rule.year===p.year&&rule.periodId===periodId);
+    const reportIncludes=(section,a,periodId)=>{
+      const rule=reportRule(section,periodId);
+      return rule?rule.subjectIds.includes(a.subjectId):scheduledFor(a,periodId);
+    };
+    function documentScope(section,{report,allSubjects}){
+      const frameId=allSubjects?null:p.frameId;
+      const frame=frameId?(db.academicFrames||[]).find(f=>f.id===frameId):null;
+      requireThat(!frameId||frame,'Cuadro no disponible');
+      const links=frame?(db.frameLinks||[]).filter(l=>l.frameId===frame.id&&l.year===p.year&&l.sectionId===p.sectionId):null;
+      if(p.periodId)period({year:p.year},p.periodId);
+      const assignments=sectionAssignments().filter(a=>!links||links.some(l=>l.subjectId===a.subjectId));
+      requireThat(user.role!=='TEACHER'||assignments.length>0,'Acceso denegado: sección o cuadro no asignado');
+      const periods=db.periods.filter(x=>x.year===p.year&&(!p.periodId||x.id===p.periodId));
+      const selectedPeriods=a=>periods.filter(x=>(!links||links.some(l=>l.subjectId===a.subjectId&&l.periodId===x.id))&&
+        (!report||reportIncludes(section,a,x.id)||(allSubjects&&scheduledFor(a,x.id))||
+          (p.reportLayout===true&&(!p.periodId||categoryOf(db.subjects.find(s=>s.id===a.subjectId)||{})!=='TECHNICAL'))));
+      return {frame,periods,assignments,selectedPeriods};
+    }
+    function sectionImportReview(){
+      admin();sectionContext();
+      requireThat(!period({year:p.year},p.periodId),'El período está cerrado');
+      requireThat(p.schema==='GENESIS_SECTION_V1'&&typeof p.hash==='string'&&/^[a-f0-9]{64}$/.test(p.hash)&&typeof p.file==='string'&&p.file.length<=180&&/^[^/\\]+\.xlsx$/i.test(p.file)&&Array.isArray(p.groups)&&p.groups.length>0&&p.groups.length<=98,'Usá un libro de sección generado en GENESIS');
+      requireThat(p.groups.every(group=>Array.isArray(group?.rows)&&group.rows.length>0&&group.rows.length<=200)&&p.groups.reduce((total,group)=>total+group.rows.length,0)<=1000,'La carga admite hasta 1000 registros y 200 estudiantes por pestaña');
+      const enrolled=new Set(db.enrollments.filter(e=>e.year===p.year&&e.sectionId===p.sectionId).map(e=>e.studentId));
+      const students=new Map(db.students.filter(s=>enrolled.has(s.id)).map(s=>[s.nie,s]));
+      const seenSubjects=new Set(),seenTabs=new Set(),pending=[];
+      let errors=0,unchanged=0;
+      const groups=p.groups.map(group=>{
+        const a=access(group.template?.assignmentId);
+        requireThat(a.year===p.year&&a.sectionId===p.sectionId&&scheduledFor(a,p.periodId),'La pestaña no pertenece a esta sección y período');
+        validateTemplate(group.template,a,p.periodId);
+        requireThat(JSON.stringify(group.template.evaluation.labels)===JSON.stringify(evaluationFor(db,a,p.periodId).labels),'Los encabezados de la plantilla cambiaron; descargá una nueva');
+        requireThat(typeof group.tab==='string'&&group.tab.length>0&&group.tab.length<=31&&!seenTabs.has(group.tab)&&!seenSubjects.has(a.subjectId),'Pestaña o asignatura repetida');
+        seenTabs.add(group.tab);seenSubjects.add(a.subjectId);
+        const subject=db.subjects.find(s=>s.id===a.subjectId),seen=new Set();
+        const rows=group.rows.map(row=>{
+          const issues=[],nie=row?.nie,student=students.get(nie);
+          if(typeof nie!=='string'||!/^\d{1,20}$/.test(nie))issues.push('NIE inválido');
+          if(seen.has(nie))issues.push('NIE repetido');seen.add(nie);
+          if(!student)issues.push('Sin matrícula en esta sección');
+          if(!Number.isSafeInteger(row?.rowNumber)||row.rowNumber<2||row.rowNumber>1048576)issues.push('Fila inválida');
+          let values=null;
+          try{resultFor(subject,row.values,a,p.periodId);values=row.values;if(values.every(v=>v===null))issues.push('Sin notas');}catch{issues.push('Revisá las notas');}
+          const key=student&&gradeKey(a,student.id,p.periodId),record=key&&index().records.get(key);
+          const same=!!record&&JSON.stringify(record.values)===JSON.stringify(row?.values);
+          if(key&&index().conflicts.has(key))issues.push('Notas pendientes de conciliación');
+          if(!same&&student&&locked(a,student.id,p.periodId))issues.push('Calificaciones bloqueadas');
+          if(record&&!same)issues.push('Ya tiene notas registradas');
+          if(issues.length)errors++;
+          else if(same)unchanged++;
+          else pending.push({a,student,values:row.values,rowNumber:row.rowNumber,tab:group.tab});
+          return {nie,name:student?.name||'',rowNumber:row?.rowNumber,values,issues,status:issues.length?'ERROR':same?'UNCHANGED':'NEW'};
+        });
+        return {tab:group.tab,subject:subjectTitle(subject),rows};
+      });
+      return {groups,errors,unchanged,additions:pending.length,pending,version:db.version};
+    }
+    if(action==='checkSectionImport'){
+      const {pending,...review}=sectionImportReview();return review;
+    }
+    if(action==='sectionWorkbook'){
+      const {year,section}=sectionContext();period({year:p.year},p.periodId);
+      const periodName=db.periods.find(x=>x.year===p.year&&x.id===p.periodId).name;
+      const rosters=sectionAssignments().filter(a=>scheduledFor(a,p.periodId)).map(a=>readRoster(db,a,p.periodId,index()));
+      return {year:{id:year.id,label:year.label||year.name},section:{id:section.id,name:section.name},periodId:p.periodId,periodName,rosters,scope:user.role==='TEACHER'?'PARTIAL':'SECTION'};
+    }
+    if(action==='reportOptions'){
+      const {section}=sectionContext();
+      if(p.forOutput===true){
+        const {assignments,selectedPeriods}=documentScope(section,{report:true,allSubjects:p.allSubjects===true});
+        return {subjects:assignments.filter(a=>selectedPeriods(a).length).map(a=>{
+          const subject=db.subjects.find(s=>s.id===a.subjectId);requireThat(subject,'Asignatura histórica sin catálogo: requiere revisión');
+          return subjectView(subject);
+        })};
+      }
+      period({year:p.year},p.periodId);
+      return {configured:!!reportRule(section,p.periodId),subjects:sectionAssignments().map(a=>({
+        subject:subjectView(db.subjects.find(s=>s.id===a.subjectId)),included:reportIncludes(section,a,p.periodId)
+      }))};
+    }
     if(action==='checkImport'){
       const a=access(p.assignmentId);requireThat(user.role!=='DIRECTION','Dirección tiene acceso de consulta');requireThat(!period(a,p.periodId),'El período está cerrado');validateTemplate(p.template,a,p.periodId);requireThat(Array.isArray(p.rows)&&p.rows.length>0&&p.rows.length<=200,'La carga debe contener entre 1 y 200 estudiantes');const seen=new Set(),subject=db.subjects.find(s=>s.id===a.subjectId);
       return {rows:p.rows.map(r=>{const s=db.students.find(s=>s.nie===r.nie),enrolled=s&&db.enrollments.some(e=>e.studentId===s.id&&e.year===a.year&&e.sectionId===a.sectionId),issues=[];if(typeof r.nie!=='string'||!/^\d{1,20}$/.test(r.nie))issues.push('NIE inválido');if(seen.has(r.nie))issues.push('NIE repetido');seen.add(r.nie);if(!enrolled)issues.push('Sin matrícula en este grupo');if(enrolled&&gradeConflict(a,s.id,p.periodId))issues.push('Notas pendientes de conciliación');if(enrolled&&locked(a,s.id,p.periodId))issues.push('Calificaciones bloqueadas');if(enrolled&&db.grades.some(g=>g.studentId===s.id&&g.year===a.year&&g.sectionId===a.sectionId&&g.subjectId===a.subjectId&&g.periodId===p.periodId))issues.push('Ya tiene notas registradas');try{resultFor(subject,r.values,a,p.periodId);}catch{issues.push('Revisá las notas');}return {nie:r.nie,name:enrolled?s.name:'',issues};})};
     }
-    if(action==='bootstrap'){const allowed=db.assignments.filter(a=>a.active&&own(a));return {specialties:(db.specialties||[]).filter(s=>user.role!=='TEACHER'||db.sections.some(section=>section.specialtyId===s.id&&allowed.some(a=>a.sectionId===section.id))),academicFrames:(db.academicFrames||[]).filter(f=>user.role!=='TEACHER'||(db.frameLinks||[]).some(l=>l.frameId===f.id&&allowed.some(a=>sameScope(l,a)))),frameLinks:(db.frameLinks||[]).filter(l=>user.role!=='TEACHER'||allowed.some(a=>sameScope(l,a))),evaluationPolicies:user.role==='ADMIN'?(db.evaluationPolicies||[]):[],user,version:db.version,assignments:allowed,subjectUsage:user.role==='ADMIN'?db.subjects.map(s=>({id:s.id,hasHistory:db.grades.some(g=>g.subjectId===s.id)||db.audit.some(e=>e.kind==='GRADE'&&e.detail.subjectId===s.id)||db.incidents.some(i=>i.kind==='SUBJECT_MERGE_GRADE_CONFLICT'&&i.subjectId===s.id)})):[],notifications:completion(db,allowed),assignmentHistory:user.role==='ADMIN'?db.assignments.filter(a=>!a.active):[],students:user.role==='ADMIN'?db.students:[],enrollments:user.role==='ADMIN'?db.enrollments:[],actors:user.role==='TEACHER'?[]:db.users.map(u=>({id:u.id,name:u.name})),sections:db.sections.filter(s=>user.role!=='TEACHER'||allowed.some(a=>a.sectionId===s.id)),subjects:db.subjects.filter(s=>user.role!=='TEACHER'||allowed.some(a=>a.subjectId===s.id)),periods:db.periods.filter(p=>user.role!=='TEACHER'||allowed.some(a=>a.year===p.year)),years:db.years.filter(y=>user.role!=='TEACHER'||allowed.some(a=>a.year===y.id)),periodStates:db.periodStates,weights:user.role==='ADMIN'?db.weights:[],teachers:user.role==='ADMIN'?db.teachers:[],users:user.role==='ADMIN'?db.users:[],audit:user.role==='TEACHER'?[]:db.audit,incidents:user.role==='TEACHER'?[]:db.incidents,batches:user.role==='TEACHER'?[]:db.batches};}
+    if(action==='bootstrap'){const allowed=db.assignments.filter(a=>a.active&&own(a));return {specialties:(db.specialties||[]).filter(s=>user.role!=='TEACHER'||db.sections.some(section=>section.specialtyId===s.id&&allowed.some(a=>a.sectionId===section.id))),academicFrames:(db.academicFrames||[]).filter(f=>user.role!=='TEACHER'||(db.frameLinks||[]).some(l=>l.frameId===f.id&&allowed.some(a=>sameScope(l,a)))),frameLinks:(db.frameLinks||[]).filter(l=>user.role!=='TEACHER'||allowed.some(a=>sameScope(l,a))),evaluationPolicies:user.role==='ADMIN'?(db.evaluationPolicies||[]):[],user,version:db.version,assignments:allowed,subjectUsage:user.role==='ADMIN'?db.subjects.map(s=>({id:s.id,hasHistory:hasSubjectGrades(s.id)||db.audit.some(e=>e.kind==='GRADE'&&e.detail.subjectId===s.id)||db.incidents.some(i=>i.kind==='SUBJECT_MERGE_GRADE_CONFLICT'&&i.subjectId===s.id)})):[],notifications:completion(db,allowed),assignmentHistory:user.role==='ADMIN'?db.assignments.filter(a=>!a.active):[],students:user.role==='ADMIN'?db.students:[],enrollments:user.role==='ADMIN'?db.enrollments:[],actors:user.role==='TEACHER'?[]:db.users.map(u=>({id:u.id,name:u.name})),sections:db.sections.filter(s=>user.role!=='TEACHER'||allowed.some(a=>a.sectionId===s.id)),subjects:db.subjects.filter(s=>user.role!=='TEACHER'||allowed.some(a=>a.subjectId===s.id)),periods:db.periods.filter(p=>user.role!=='TEACHER'||allowed.some(a=>a.year===p.year)),years:db.years.filter(y=>user.role!=='TEACHER'||allowed.some(a=>a.year===y.id)),periodStates:db.periodStates,weights:user.role==='ADMIN'?db.weights:[],teachers:user.role==='ADMIN'?db.teachers:[],users:user.role==='ADMIN'?db.users:[],audit:user.role==='TEACHER'?[]:db.audit,incidents:user.role==='TEACHER'?[]:db.incidents,batches:user.role==='TEACHER'?[]:db.batches};}
     if(action==='roster'||action==='export') {
       const a=access(p.assignmentId);period(a,p.periodId);return readRoster(db,a,p.periodId,index());
     }
@@ -148,36 +255,63 @@ var Genesis = (() => {
       const periods=db.periods.filter(p=>p.year===a.year);
       return {assignment:{...a},subject:subjectView(subject),section:{...db.sections.find(s=>s.id===a.sectionId)},year:{...db.years.find(y=>y.id===a.year)},teacher:{name:db.users.find(u=>u.id===a.teacherId)?.name||''},specialty:(db.specialties||[]).find(s=>s.id===db.sections.find(s=>s.id===a.sectionId)?.specialtyId)||null,periods:periods.map(p=>({...p,roster:readRoster(db,a,p.id,index())})),version:db.version};
     }
-    if(['consolidated','reportCard','frame'].includes(action)){
-      const year=db.years.find(y=>y.id===p.year),section=db.sections.find(s=>s.id===p.sectionId);
-      requireThat(year&&section,'Seleccioná año lectivo y sección válidos');
-      const frame=p.frameId?(db.academicFrames||[]).find(f=>f.id===p.frameId):null;
-      requireThat(!p.frameId||frame,'Cuadro no disponible');
-      const links=frame?(db.frameLinks||[]).filter(l=>l.frameId===frame.id&&l.year===p.year&&l.sectionId===p.sectionId):null;
-      if(p.periodId)period({year:p.year},p.periodId);
-      const candidates=db.assignments.filter(a=>a.year===p.year&&a.sectionId===p.sectionId&&(user.role!=='TEACHER'||a.active&&own(a))).sort((a,b)=>Number(b.active)-Number(a.active));
-      if(user.role!=='TEACHER')for(const g of db.grades.filter(g=>g.year===p.year&&g.sectionId===p.sectionId))if(!candidates.some(a=>a.subjectId===g.subjectId))candidates.push({year:g.year,sectionId:g.sectionId,subjectId:g.subjectId,teacherId:null,active:false});
-      if(user.role!=='TEACHER')for(const subjectId of section.subjectIds||[])if(!candidates.some(a=>a.subjectId===subjectId))candidates.push({year:p.year,sectionId:p.sectionId,subjectId,teacherId:null,active:false});
-      const assignments=candidates.filter((a,i)=>candidates.findIndex(x=>x.subjectId===a.subjectId)===i&&(!links||links.some(l=>l.subjectId===a.subjectId)));
-      requireThat(user.role!=='TEACHER'||assignments.length>0,'Acceso denegado: sección o cuadro no asignado');
-      const periods=db.periods.filter(x=>x.year===p.year&&(!p.periodId||x.id===p.periodId));
+    if(['consolidated','reportCard','sectionReportCards','frame'].includes(action)){
+      const {year,section}=sectionContext(),report=action==='reportCard'||action==='sectionReportCards';
+      const allSubjects=report&&p.allSubjects===true;
+      const {frame,periods,assignments,selectedPeriods}=documentScope(section,{report,allSubjects});
       const columns=assignments.map(a=>{
         const subject=db.subjects.find(s=>s.id===a.subjectId);requireThat(subject,'Asignatura histórica sin catálogo: requiere revisión');
-        const selectedPeriods=periods.filter(x=>!links||links.some(l=>l.subjectId===a.subjectId&&l.periodId===x.id));
-        const rosters=selectedPeriods.map(x=>({period:x,roster:readRoster(db,a,x.id,index())}));
+        const includedPeriods=selectedPeriods(a);
+        const rosters=includedPeriods.map(x=>({period:x,roster:readRoster(db,a,x.id,index())}));
         const teacherIds=[...new Set(db.assignments.filter(x=>x.active&&sameScope(x,a)).map(x=>x.teacherId))];
-        return {subject:subjectView(subject),teachers:teacherIds.map(id=>db.users.find(u=>u.id===id)?.name||'Docente'),periods:selectedPeriods,rosters};
+        return {subject:subjectView(subject),teachers:teacherIds.map(id=>db.users.find(u=>u.id===id)?.name||'Docente'),periods:includedPeriods,rosters};
       }).filter(c=>c.periods.length);
-      const enrolled=db.enrollments.filter(e=>e.year===p.year&&e.sectionId===p.sectionId&&(!p.studentId||e.studentId===p.studentId));
+      const sectionEnrollments=db.enrollments.filter(e=>e.year===p.year&&e.sectionId===p.sectionId);
+      const studentIds=new Set(sectionEnrollments.map(e=>e.studentId));
+      let selectedIds;
+      if(action==='sectionReportCards'&&p.studentIds!==undefined){
+        requireThat(Array.isArray(p.studentIds)&&p.studentIds.length>0&&p.studentIds.every(id=>studentIds.has(id)),'Seleccioná estudiantes matriculados en esta sección');
+        selectedIds=new Set(p.studentIds);
+      }
+      const filled=new Set(db.grades.filter(g=>g.year===p.year&&g.sectionId===p.sectionId&&studentIds.has(g.studentId)&&g.values?.some(v=>typeof v==='number'&&Number.isFinite(v))).map(g=>JSON.stringify([g.subjectId,g.periodId])));
+      const moduleFinals=new Map((p.periodId?[]:db.moduleFinals||[]).filter(g=>g.year===p.year&&g.sectionId===p.sectionId).map(g=>[JSON.stringify([g.subjectId,g.studentId]),g]));
+      const enrolled=sectionEnrollments.filter(e=>(!p.studentId||e.studentId===p.studentId)&&(!selectedIds||selectedIds.has(e.studentId)));
       if(action==='reportCard')requireThat(p.studentId&&enrolled.length===1,'Estudiante no matriculado en esta sección');
       const students=enrolled.map(e=>{
         const student=db.students.find(s=>s.id===e.studentId);requireThat(student,'Matrícula sin estudiante: requiere revisión');
-        return {...student,entries:columns.map(c=>({subject:c.subject,teachers:c.teachers,periods:c.rosters.map(({period,roster})=>{const row=roster.students.find(s=>s.id===student.id),plan=roster.evaluation;return {id:period.id,name:period.name,values:row.values,value:row.result.value,locked:row.locked,conflict:row.conflict,evaluation:{mode:plan.mode,count:plan.count,labels:plan.labels,weights:plan.weights}};}),final:c.rosters[0].roster.students.find(s=>s.id===student.id).final}))};
+        return {...student,entries:columns.map(c=>{
+          const moduleFinal=moduleFinals.get(JSON.stringify([c.subject.id,student.id]));
+          const annualModuleGrade=moduleFinal?calculate('MODULO_FASES',moduleFinal.values,moduleFinal.weights).value:null;
+          const final=c.rosters[0].roster.students.find(s=>s.id===student.id).final;
+          return {subject:c.subject,teachers:c.teachers,periods:c.rosters.map(({period,roster})=>{
+          const row=roster.students.find(s=>s.id===student.id),plan=roster.evaluation;
+          const criteria=report?index().records.get(gradeKey(roster.assignment,student.id,period.id))?.source?.conductCriteria:null;
+          const criteriaResults=Array.isArray(criteria)&&criteria.length===4&&criteria.every(item=>['E','MB','B'].includes(item?.result))?criteria.map(item=>item.result):null;
+          return {id:period.id,name:period.name,values:row.values,value:row.result.value,locked:row.locked,conflict:row.conflict,unfilledModule:c.subject.type==='MODULO_FASES'&&!filled.has(JSON.stringify([c.subject.id,period.id])),evaluation:{mode:plan.mode,count:plan.count,labels:plan.labels,weights:plan.weights},...(criteriaResults?{conductCriteria:criteriaResults}:{})};
+          }),final:annualModuleGrade===null?final:{...final,value:annualModuleGrade,status:'REGISTRADO',approved:annualModuleGrade>=7}};
+        })};
       });
-      return {kind:action,year:{id:year.id,label:year.label||year.name},section,frame,specialty:(db.specialties||[]).find(s=>s.id===(frame?.specialtyId||section.specialtyId))||null,scope:user.role==='TEACHER'?'PARTIAL':'SECTION',students,columns:columns.map(({subject,teachers,periods})=>({subject,teachers,periods})),version:db.version,decimals:1,notice:user.role==='TEACHER'?'Consulta parcial: únicamente asignaturas asignadas a este docente.':'Documento de consulta académica. Formato oficial y firmas pendientes de validación.'};
+      return {kind:action,year:{id:year.id,label:year.label||year.name},section,frame,periods,specialty:(db.specialties||[]).find(s=>s.id===(frame?.specialtyId||section.specialtyId))||null,scope:user.role==='TEACHER'?'PARTIAL':'SECTION',students,columns:columns.map(({subject,teachers,periods})=>({subject,teachers,periods})),version:db.version,decimals:1,notice:user.role==='TEACHER'?'Consulta parcial: únicamente asignaturas asignadas a este docente.':'Documento de consulta académica. Formato oficial y firmas pendientes de validación.'};
     }
     requireThat(p.version===db.version,'Los datos cambiaron. Recargá antes de guardar');
-    if(action==='specialty'){
+    if(action==='reportSubjects'){
+      admin();const {section}=sectionContext();period({year:p.year},p.periodId);
+      const subjects=new Set(sectionAssignments().map(a=>a.subjectId)),before=reportRule(section,p.periodId)||null;
+      requireThat(p.subjectIds===null||Array.isArray(p.subjectIds)&&p.subjectIds.length<=subjects.size&&p.subjectIds.every(id=>subjects.has(id))&&new Set(p.subjectIds).size===p.subjectIds.length,'La selección contiene asignaturas ajenas o repetidas');
+      const after=p.subjectIds===null?null:{year:p.year,periodId:p.periodId,subjectIds:p.subjectIds.slice()};
+      section.reportSubjects=(section.reportSubjects||[]).filter(rule=>rule!==before);
+      if(after)section.reportSubjects.push(after);
+      event('REPORT_SUBJECTS',{year:p.year,sectionId:p.sectionId,periodId:p.periodId,before,after});
+    } else if(action==='importSectionWorkbook'){
+      const review=sectionImportReview();
+      requireThat(!review.errors,'El libro contiene filas con conflictos; revisalo antes de importar');
+      requireThat(review.pending.length,'No hay notas nuevas para importar');
+      const batch={id:`section-${db.version}`,hash:p.hash,bulk:true,year:p.year,sectionId:p.sectionId,periodId:p.periodId,status:'IMPORTED',owner:user.id,summary:{blocks:review.groups.length,rows:review.additions}};
+      for(const {a,student,values,rowNumber,tab} of review.pending){
+        db.grades.push({id:`ig-${db.grades.length}-${db.version}`,studentId:student.id,year:a.year,sectionId:a.sectionId,subjectId:a.subjectId,periodId:p.periodId,values:values.slice(),source:{file:p.file,sheet:tab,block:p.schema,cell:'A'+rowNumber,assignmentId:a.id,batch:batch.id}});
+      }
+      db.batches.push(batch);event('IMPORT_APPROVED',{batchId:batch.id,count:review.additions,sectionId:p.sectionId,year:p.year,periodId:p.periodId});
+    } else if(action==='specialty'){
       admin();requireThat(typeof p.name==='string'&&p.name.trim().length>0&&p.name.length<=160,'Nombre de especialidad inválido');
       const existing=p.specialtyId?db.specialties.find(s=>s.id===p.specialtyId):null;requireThat(!p.specialtyId||existing,'Especialidad no encontrada');
       requireThat(!db.specialties.some(s=>s.id!==existing?.id&&s.name.toLowerCase()===p.name.trim().toLowerCase()),'La especialidad ya existe');
@@ -244,7 +378,7 @@ var Genesis = (() => {
       requireThat(!old.some(id=>!unique.includes(id)&&db.periodStates.some(s=>s.year===a.year&&s.periodId===id&&s.closed)),'No se puede retirar un período cerrado del calendario');
       requireThat(!db.grades.some(g=>g.year===a.year&&g.sectionId===a.sectionId&&g.subjectId===a.subjectId&&!unique.includes(g.periodId)),'El módulo tiene notas en un período que intentás retirar');a.requiredPeriods=unique;event('MODULE_SCHEDULE',{assignmentId:a.id,before:old,after:unique});
     } else if(action==='policy') {
-      admin();const subject=db.subjects.find(s=>s.id===p.subjectId);requireThat(subject&&!db.grades.some(g=>g.subjectId===p.subjectId),'Solo se configura una materia sin notas históricas');requireThat(typeof p.reason==='string'&&p.reason.trim().length>=10&&(p.decimals===undefined||p.decimals===1),'Se requiere justificación; las notas se muestran con un decimal');requireThat(Array.isArray(p.weights),'Ponderaciones inválidas');calculate(subject.type,Array(subject.type==='MODULO_FASES'?9:3).fill(0),p.weights);db.weights=db.weights.filter(w=>w.id!==subject.id);db.weights.push({id:subject.id,values:p.weights.slice(),status:'CONFIGURADO_POR_ADMINISTRACION',reason:p.reason});subject.decimals=1;event('POLICY',{subjectId:subject.id,weights:p.weights,decimals:p.decimals,reason:p.reason});
+      admin();const subject=db.subjects.find(s=>s.id===p.subjectId);requireThat(subject&&!hasSubjectGrades(p.subjectId),'Solo se configura una materia sin notas históricas');requireThat(typeof p.reason==='string'&&p.reason.trim().length>=10&&(p.decimals===undefined||p.decimals===1),'Se requiere justificación; las notas se muestran con un decimal');requireThat(Array.isArray(p.weights),'Ponderaciones inválidas');calculate(subject.type,Array(subject.type==='MODULO_FASES'?9:3).fill(0),p.weights);db.weights=db.weights.filter(w=>w.id!==subject.id);db.weights.push({id:subject.id,values:p.weights.slice(),status:'CONFIGURADO_POR_ADMINISTRACION',reason:p.reason});subject.decimals=1;event('POLICY',{subjectId:subject.id,weights:p.weights,decimals:p.decimals,reason:p.reason});
     } else if(action==='credentials') {
       admin();requireThat(db.users.some(u=>u.id===p.userId&&u.active)&&typeof p.username==='string'&&/^[\p{L}\p{N}._-]{3,40}$/u.test(p.username),'Usuario inválido');event('ACCESS_CHANGED',{userId:p.userId,username:p.username});
     } else if(action==='userRole') {
@@ -261,12 +395,12 @@ var Genesis = (() => {
       if(p.entity==='subjects'&&typeof p.name==='string')p={...p,name:subjectName(p.name)};
       admin();requireThat(['sections','subjects','years'].includes(p.entity),'Catálogo inválido');const record=db[p.entity].find(x=>x.id===p.recordId);requireThat(record&&typeof p.name==='string'&&p.name.trim()&&p.name.length<=(p.entity==='subjects'?240:120),'Nombre inválido');requireThat(!db[p.entity].some(x=>x.id!==record.id&&(x.name||x.label)?.toLowerCase()===p.name.trim().toLowerCase()),'El registro ya existe');const before=JSON.parse(JSON.stringify(record));
       if(p.entity==='sections'&&p.grade){requireThat(['1','2','3'].includes(p.grade),'Grado inválido');record.grade=p.grade;}
-      if(p.entity==='subjects'&&p.type!==undefined){requireThat(['GENERAL_4_PERIODOS','MODULO_FASES'].includes(p.type),'Categoría inválida');if(p.type!==record.type){requireThat(!db.grades.some(g=>g.subjectId===record.id)&&!db.audit.some(e=>e.kind==='GRADE'&&e.detail.subjectId===record.id)&&!db.incidents.some(i=>i.kind==='SUBJECT_MERGE_GRADE_CONFLICT'&&i.subjectId===record.id),'La categoría no puede cambiar porque la materia tiene historial académico');requireThat(!db.assignments.some(a=>a.subjectId===record.id&&db.periodStates.some(s=>s.year===a.year&&s.closed)),'No se puede cambiar la categoría con períodos cerrados');record.type=p.type;db.blocks=db.blocks.filter(b=>b.id!==record.id);db.activities=db.activities.filter(a=>a.blockId!==record.id);db.weights=db.weights.filter(w=>w.id!==record.id);db.blocks.push({id:record.id,type:p.type});const n=p.type==='MODULO_FASES'?9:3;for(let i=0;i<n;i++)db.activities.push({id:`${record.id}-${i}`,blockId:record.id,index:i});db.weights.push({id:record.id,values:n===9?[.25,.5,.25]:[.35,.35,.3],status:'OBSERVADO_PENDIENTE_VALIDACION'});for(const a of db.assignments.filter(a=>a.subjectId===record.id))delete a.requiredPeriods;}}
+      if(p.entity==='subjects'&&p.type!==undefined){requireThat(['GENERAL_4_PERIODOS','MODULO_FASES'].includes(p.type),'Categoría inválida');if(p.type!==record.type){requireThat(!hasSubjectGrades(record.id)&&!db.audit.some(e=>e.kind==='GRADE'&&e.detail.subjectId===record.id)&&!db.incidents.some(i=>i.kind==='SUBJECT_MERGE_GRADE_CONFLICT'&&i.subjectId===record.id),'La categoría no puede cambiar porque la materia tiene historial académico');requireThat(!db.assignments.some(a=>a.subjectId===record.id&&db.periodStates.some(s=>s.year===a.year&&s.closed)),'No se puede cambiar la categoría con períodos cerrados');record.type=p.type;db.blocks=db.blocks.filter(b=>b.id!==record.id);db.activities=db.activities.filter(a=>a.blockId!==record.id);db.weights=db.weights.filter(w=>w.id!==record.id);db.blocks.push({id:record.id,type:p.type});const n=p.type==='MODULO_FASES'?9:3;for(let i=0;i<n;i++)db.activities.push({id:`${record.id}-${i}`,blockId:record.id,index:i});db.weights.push({id:record.id,values:n===9?[.25,.5,.25]:[.35,.35,.3],status:'OBSERVADO_PENDIENTE_VALIDACION'});for(const a of db.assignments.filter(a=>a.subjectId===record.id))delete a.requiredPeriods;}}
       if(p.entity==='subjects')subjectMetadata(record,p);record.name=p.name.trim();if(p.entity==='years')record.label=record.name;event('CATALOG_UPDATE',{entity:p.entity,before,after:record});
     } else if(action==='student') {
       admin();const student=db.students.find(s=>s.id===p.studentId);requireThat(student&&typeof p.nie==='string'&&/^\d{1,20}$/.test(p.nie)&&typeof p.name==='string'&&p.name.trim()&&p.name.length<=160,'Estudiante inválido');requireThat(!db.students.some(s=>s.id!==student.id&&s.nie===p.nie),'El NIE ya pertenece a otro estudiante');const before={...student};student.name=p.name.trim();student.nie=p.nie;event('STUDENT_UPDATE',{before,after:student});
     } else if(action==='updateEnrollment') {
-      admin();const enrollment=db.enrollments.find(e=>e.id===p.enrollmentId);requireThat(enrollment&&db.sections.some(s=>s.id===p.sectionId),'Matrícula inválida');requireThat(!db.grades.some(g=>g.studentId===enrollment.studentId&&g.year===enrollment.year),'La matrícula tiene notas registradas; requiere un traslado académico autorizado');const before={...enrollment};enrollment.sectionId=p.sectionId;event('ENROLLMENT_UPDATE',{before,after:enrollment});
+      admin();const enrollment=db.enrollments.find(e=>e.id===p.enrollmentId);requireThat(enrollment&&db.sections.some(s=>s.id===p.sectionId),'Matrícula inválida');requireThat(![...db.grades,...(db.moduleFinals||[])].some(g=>g.studentId===enrollment.studentId&&g.year===enrollment.year),'La matrícula tiene notas registradas; requiere un traslado académico autorizado');const before={...enrollment};enrollment.sectionId=p.sectionId;event('ENROLLMENT_UPDATE',{before,after:enrollment});
     } else if(action==='enroll') {
       admin();requireThat(typeof p.nie==='string'&&/^\d{1,20}$/.test(p.nie)&&typeof p.name==='string'&&p.name.trim(),'NIE o nombre inválido');requireThat(db.sections.some(s=>s.id===p.sectionId)&&db.years.some(y=>y.id===p.year),'Año o sección inválidos');
       let s=db.students.find(s=>s.nie===p.nie);if(!s){s={id:`s-${db.version}`,nie:p.nie,name:p.name.trim()};db.students.push(s);}requireThat(!db.enrollments.some(e=>e.studentId===s.id&&e.year===p.year),'Estudiante ya matriculado en ese año');db.enrollments.push({id:`e-${db.version}`,studentId:s.id,year:p.year,sectionId:p.sectionId});event('ENROLL',{studentId:s.id,year:p.year,sectionId:p.sectionId});

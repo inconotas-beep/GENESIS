@@ -1,6 +1,6 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {pilotPlatform} from './helpers/pilot-platform.mjs';
-test('Pilot: primera ejecución crea 24 tablas sintéticas; segunda reutiliza recursos y conserva notas',()=>{
- const env=pilotPlatform();assert.equal(env.c.preparePilot_().status,'INITIALIZED');assert.equal(env.books.get(env.props.get('SPREADSHEET_ID')).sheets.size,25);assert.equal(env.current().students.length,4);
+import test from 'node:test';import assert from 'node:assert/strict';import {pilotPlatform} from './helpers/pilot-platform.mjs';import G from '../tools/core.mjs';
+test('Pilot: primera ejecución crea las tablas sintéticas; segunda reutiliza recursos y conserva notas',()=>{
+ const env=pilotPlatform();assert.equal(env.c.preparePilot_().status,'INITIALIZED');assert.equal(env.books.get(env.props.get('SPREADSHEET_ID')).sheets.size,G.tables.length+1);assert.equal(env.current().students.length,4);
  env.as('a@clases.edu.sv');env.c.api('saveGrades',{version:0,assignmentId:'pilot-assignment-1',periodId:'1',rows:[{studentId:'pilot-student-1',values:[8,0,null]}]});env.as('owner@clases.edu.sv');const result=env.c.preparePilot_();assert.equal(result.status,'ALREADY_INITIALIZED');assert.equal(result.version,1);assert.deepEqual(env.current().grades[0].values,[8,0,null]);assert.equal(env.pilotStats.spreadsheets,1);assert.equal(env.pilotStats.folders,3);
 });
 for(const failure of ['folder-after-create','sheet-after-create','table:grades'])test('Pilot: retoma sin duplicados después de '+failure,()=>{

@@ -14,7 +14,7 @@ var GoogleLogin=(()=>{
   $('googleFinishHere').classList.add('hidden');
  }
  function showLogin(text){$('login').classList.remove('hidden');$('googleSignInPanel').classList.remove('hidden');$('googleAccess').textContent=text;$('googleSignIn').disabled=false;}
- function expired(error){if(mode==='GOOGLE_OAUTH'&&String(error?.message||'').includes('Iniciá sesión nuevamente'))showLogin('Tu sesión venció. Volvé a ingresar para continuar; tus notas pendientes se conservan.');}
+ function expired(error){if(!String(error?.message||'').includes('Iniciá sesión nuevamente'))return;if(mode==='PASSWORD'){$('login').classList.remove('hidden');$('loginForm').classList.remove('hidden');}else if(mode==='GOOGLE_OAUTH')showLogin('Tu sesión venció. Volvé a ingresar para continuar; tus notas pendientes se conservan.');}
  async function poll(){
   if(inFlight||!flow)return;inFlight=true;
   const request=generation;
@@ -47,6 +47,22 @@ var GoogleLogin=(()=>{
  }
  async function initialize(){
   const settings=await raw('authConfig');mode=settings.mode;
+  if(mode==='PASSWORD'){
+   $('googleAccess').classList.add('hidden');
+   $('loginForm').classList.remove('hidden');
+   $('loginForm').onsubmit=safe(async()=>{
+    const password=$('password').value;
+    $('password').value='';
+    const result=await raw('nativeLogin',{username:$('username').value,password});
+    save(result.token);
+    const next=await api('bootstrap');
+    if(state&&dirty&&state.user.id!==next.user.id){await raw('authLogout');save('');throw Error('Ingresá con la misma cuenta para conservar el borrador.');}
+    if(state&&dirty)$('login').classList.add('hidden');else await refresh();
+   });
+   $('googleSignOut').onclick=safe(async()=>{if(canDiscard()){await raw('authLogout');save('');location.reload();}});
+   if(session)try{await refresh();return;}catch{save('');}
+   return;
+  }
   if(mode!=='GOOGLE_OAUTH'){await refresh();return;}
   $('googleSignIn').onclick=start;
   document.addEventListener('visibilitychange',()=>{if(timer&&!document.hidden)void poll();});
@@ -74,5 +90,5 @@ var GoogleLogin=(()=>{
   if(session){try{await refresh();$('googleSignOut').classList.remove('hidden');return;}catch{save('');}}
   showLogin('Ingresá con una cuenta de Google aprobada por administración.');
  }
- return {initialize,token:()=>session,expired};
+ return {initialize,token:()=>session,expired,native:()=>mode==='PASSWORD'};
 })();
